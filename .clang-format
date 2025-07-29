@@ -1,0 +1,12 @@
+BasedOnStyle: LLVM
+SpaceBeforeParens: Never
+SortIncludes: true
+UseTab: Always
+IndentWidth: 4
+TabWidth: 4
+AllowShortFunctionsOnASingleLine: Empty
+IndentCaseLabels: true
+AlignConsecutiveAssignments: false
+AlignArrayOfStructures: Left
+AllowShortBlocksOnASingleLine: Empty
+ColumnLimit: 0
