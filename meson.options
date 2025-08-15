@@ -1,0 +1,1 @@
+option('client_id', type: 'string', value: '95984717-05f1-4b52-8a66-064d0e1e5b55', description: 'Azure application client ID used for microsoft authentication')
