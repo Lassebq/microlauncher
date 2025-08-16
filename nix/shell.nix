@@ -1,6 +1,9 @@
 {
   mkShell,
   gdb,
+  meson,
+  ninja,
+  pkg-config,
   gtk4,
   curl,
   openssl,
@@ -11,7 +14,7 @@
 mkShell {
   name = "C";
 
-  packages = [gdb]
+  packages = [gdb];
 
   nativeBuildInputs = [meson ninja pkg-config];
   buildInputs = [
