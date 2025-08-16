@@ -80,7 +80,6 @@ struct User *microlauncher_account_get(GSList *list, const char *id) {
 	return NULL;
 }
 
-
 void microlauncher_load_account(json_object *obj, struct User *user) {
 	user->name = g_strdup(json_get_string(obj, "name"));
 	user->uuid = g_strdup(json_get_string(obj, "uuid"));
@@ -226,11 +225,11 @@ bool microlauncher_init(int argc, char **argv) {
 	}
 	json_object *manifestJson = microlauncher_http_get_json(BETTERJSONS_MANIFEST, NULL, NULL);
 	manifest = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, microlauncher_version_destroy);
-	
+
 	snprintf(path, PATH_MAX, "%s/versions", settings.launcher_root);
 	GDir *dir = g_dir_open(path, 0, NULL);
 	const char *filename;
-	while ((filename = g_dir_read_name(dir))) {
+	while((filename = g_dir_read_name(dir))) {
 		snprintf(path, PATH_MAX, "%s/versions/%s/%s.json", settings.launcher_root, filename, filename);
 		if(access(path, F_OK) == 0) {
 			json_object *obj = json_from_file(path);
@@ -240,7 +239,7 @@ bool microlauncher_init(int argc, char **argv) {
 			}
 		}
 	}
-		
+
 	json_object *versions = json_object_object_get(manifestJson, "versions");
 	if(json_object_is_type(versions, json_type_array)) {
 		int n = json_object_array_length(versions);
@@ -251,8 +250,7 @@ bool microlauncher_init(int argc, char **argv) {
 				json_get_string(iter, "type"),
 				json_get_string(iter, "releaseTime"),
 				json_get_string(iter, "sha1"),
-				json_get_string(iter, "url")
-			);
+				json_get_string(iter, "url"));
 			g_hash_table_replace(manifest, ver->id, ver);
 		}
 	}
@@ -449,7 +447,7 @@ json_object *inherit_json(const char *versions_path, const char *id) {
 			json_object *otherMember = json_object_object_get(obj, key);
 			if(json_object_get_type(thisMember) == json_object_get_type(otherMember)) {
 				if(json_object_is_type(otherMember, json_type_array)) {
-					for (size_t i = 0; i < json_object_array_length(thisMember); i++) {
+					for(size_t i = 0; i < json_object_array_length(thisMember); i++) {
 						json_object_array_insert_idx(otherMember, i, json_object_array_get_idx(thisMember, i));
 					}
 				} else {
@@ -711,7 +709,7 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	int n = 1;
 	n += user->accessToken ? strlen(user->accessToken) : 0;
 	n += user->uuid ? strlen(user->uuid) : 0;
-	n += strlen("token::") ;
+	n += strlen("token::");
 	char auth_session[n];
 	snprintf(auth_session, sizeof(auth_session), "token:%s:%s", user->accessToken ? user->accessToken : "", user->uuid ? user->uuid : "");
 	const char *replaces[] = {
@@ -751,7 +749,7 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	int argsCount = strsplit(str, ' ', gameArgs, 255 - c);
 	for(int j = 0; j < argsCount; j++) {
 		i = 0;
-		
+
 		String strBuff = string_new(gameArgs[j]);
 		while(replaces[i]) {
 			replace_str(&strBuff, replaces[i], replaces[i + 1]);
@@ -799,7 +797,7 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	if(WIFEXITED(status)) {
 		g_print("Process exited with code %d", WEXITSTATUS(status));
 	}
-	
+
 	for(int i = 0; i < m; i++) {
 		free(argv_malloc[i]);
 	}

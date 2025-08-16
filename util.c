@@ -201,9 +201,9 @@ void replace_str(String *src, const char *replace, const char *replacement) {
 	String str = string_new_n(src->length);
 	int k = 0;
 	while(src->data[k]) {
-		if(strncmp(src->data+k, replace, replaceSize) == 0) {
+		if(strncmp(src->data + k, replace, replaceSize) == 0) {
 			string_append(&str, replacement);
-			k+=replaceSize;
+			k += replaceSize;
 			continue;
 		}
 		string_append_char(&str, src->data[k]);
@@ -212,7 +212,7 @@ void replace_str(String *src, const char *replace, const char *replacement) {
 	src->length = str.length;
 	src->size = str.size;
 	src->data = malloc(str.size);
-	memcpy(src->data, str.data, str.length+1);
+	memcpy(src->data, str.data, str.length + 1);
 	string_destroy(&str);
 }
 
@@ -223,11 +223,11 @@ void bytes_as_hex(unsigned char *bytes, int size, char *dest) {
 }
 
 gconstpointer g_slist_find_custom_value(GSList *list, gconstpointer val, GCompareFunc comp) {
-    GSList *element = g_slist_find_custom(list, val, comp);
-    if(element) {
-        return element->data;
-    }
-    return NULL;
+	GSList *element = g_slist_find_custom(list, val, comp);
+	if(element) {
+		return element->data;
+	}
+	return NULL;
 }
 
 const char *util_basename(const char *path) {

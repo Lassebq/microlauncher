@@ -1,20 +1,20 @@
 #pragma once
 #include "glib.h"
 #include "json_types.h"
+#include <openssl/sha.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <openssl/sha.h>
 
 typedef char Sha1[SHA_DIGEST_LENGTH * 2 + 1];
 typedef char Sha256[SHA256_DIGEST_LENGTH * 2 + 1];
 
 typedef struct {
-    /* pointer to string with null terminator */
-    char *data;
-    /* length without null terminator */
-    int length;
-    /* allocated size */
-    int size;
+	/* pointer to string with null terminator */
+	char *data;
+	/* length without null terminator */
+	int length;
+	/* allocated size */
+	int size;
 } String;
 
 String string_new_n(int n);

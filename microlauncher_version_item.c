@@ -1,6 +1,6 @@
+#include "microlauncher_version_item.h"
 #include "glib-object.h"
 #include "glib.h"
-#include "microlauncher_version_item.h"
 
 static GParamSpec *properties[N_PROPERTIES] = {NULL};
 
@@ -26,7 +26,7 @@ static void microlauncher_version_item_set_property(GObject *object, guint prope
 
 static void microlauncher_version_item_get_property(GObject *object, guint property_id, GValue *value, GParamSpec *pspec) {
 	VersionItem *self = MICROLAUNCHER_VERSION_ITEM(object);
-	switch (property_id) {
+	switch(property_id) {
 		case PROP_VERSION_LABEL:
 			g_value_set_string(value, self->version);
 			return;
@@ -58,7 +58,7 @@ static void microlauncher_version_item_class_init(VersionItemClass *klass) {
 		NULL, G_PARAM_READABLE);
 	object_class->get_property = microlauncher_version_item_get_property;
 	object_class->set_property = microlauncher_version_item_set_property;
-    g_object_class_install_properties(object_class, G_N_ELEMENTS(properties), properties);
+	g_object_class_install_properties(object_class, G_N_ELEMENTS(properties), properties);
 }
 
 VersionItem *microlauncher_version_item_new(const char *version, const char *type, const char *releaseTime) {

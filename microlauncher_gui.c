@@ -727,7 +727,7 @@ static void account_list_view_setup_factory(GtkListItemFactory *factory, GtkList
 static void account_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant *parameter, gpointer *data) {
 	struct User *account = (struct User *)data;
 	if(strcmp(g_action_get_name(G_ACTION(simple_action)), "edit") == 0) {
-	
+
 	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "delete") == 0) {
 		remove_account(account);
 	}

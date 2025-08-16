@@ -42,31 +42,27 @@ GtkWindow *gtk_modal_dialog_new(GtkWindow *parent) {
 	return newWindow;
 }
 
-void
-on_format_number (GtkEditable *editable,
-                  const gchar *text,
-                  gint        length,
-                  gint        *position,
-                  gpointer    user_data)
-{
-  if (g_unichar_isdigit (g_utf8_get_char (text)))
-    {
-          g_signal_handlers_block_by_func (editable,
-                                           (gpointer) on_format_number,
-                                           user_data);
-          
-          gtk_editable_insert_text (editable,
-                                    text,
-                                    length,
-                                    position);
-          
-          g_signal_handlers_unblock_by_func (editable,
-                                             (gpointer) on_format_number,
-                                             user_data);
-      
-    }
-  
-  g_signal_stop_emission_by_name (editable, "insert_text");
+void on_format_number(GtkEditable *editable,
+					  const gchar *text,
+					  gint length,
+					  gint *position,
+					  gpointer user_data) {
+	if(g_unichar_isdigit(g_utf8_get_char(text))) {
+		g_signal_handlers_block_by_func(editable,
+										(gpointer)on_format_number,
+										user_data);
+
+		gtk_editable_insert_text(editable,
+								 text,
+								 length,
+								 position);
+
+		g_signal_handlers_unblock_by_func(editable,
+										  (gpointer)on_format_number,
+										  user_data);
+	}
+
+	g_signal_stop_emission_by_name(editable, "insert_text");
 }
 
 GtkEntry *gtk_entry_digits_only(void) {

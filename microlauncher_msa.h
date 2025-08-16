@@ -10,17 +10,17 @@
 #define URL_MCAPI_PROFILE "https://api.minecraftservices.com/minecraft/profile"
 
 struct MinecraftProfile {
-    char *username;
-    char *uuid;
+	char *username;
+	char *uuid;
 };
 
 struct MicrosoftUser {
-    char *access_token;
-    char *refresh_token;
-    char *xbl_token;
-    char *uhs;
-    char *xsts_token;
-    char *mc_access_token;
+	char *access_token;
+	char *refresh_token;
+	char *xbl_token;
+	char *uhs;
+	char *xsts_token;
+	char *mc_access_token;
 };
 
 struct DeviceCodeOAuthResponse {
