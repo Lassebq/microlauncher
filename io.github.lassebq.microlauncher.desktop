@@ -1,0 +1,8 @@
+#!/usr/bin/env xdg-open
+[Desktop Entry]
+Name=MicroLauncher
+Exec=microlauncher
+Icon=io.github.lassebq.microlauncher
+Terminal=false
+Type=Application
+Categories=Game;

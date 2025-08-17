@@ -15,8 +15,13 @@ sources = [
   'xdgutil.c',
   'util.c',
   'json_util.c',
-  'gtk_util.c'
+  'gtk_util.c',
 ]
+
+foreach size : ['48', '64', '128', '256', '512']
+  install_data('assets/scaled_' + size + 'x' + size + '.png', install_dir: get_option('datadir'), rename: 'icons/hicolor/' + size + 'x' + size + '/apps/io.github.lassebq.microlauncher.png')
+endforeach
+install_data('io.github.lassebq.microlauncher.desktop', install_dir: get_option('datadir') / 'applications')
 
 m_dep = cc.find_library('m', required : false)
 
@@ -32,6 +37,7 @@ deps = [
 
 exe = executable('microlauncher', sources,
   dependencies: deps,
+  # include_directories: include_directories,
   install : true
 )
 
