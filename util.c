@@ -2,6 +2,7 @@
 #include "json_tokener.h"
 #include "uuid.h"
 #include <errno.h>
+#include <linux/limits.h>
 #include <openssl/sha.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -9,6 +10,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <util.h>
+#include <zip.h>
 
 String string_new_n(int n) {
 	String string = {
@@ -245,4 +247,61 @@ char *random_uuid(void) {
 	uuid_generate_random(uuid);
 	uuid_unparse_lower(uuid, str);
 	return str;
+}
+
+static bool str_starts_with_strv(const char **strv, const char *str) {
+	while(*strv) {
+		if(strncmp(str, *strv, strlen(*strv)) == 0) {
+			return true;
+		}
+		strv++;
+	}
+	return false;
+}
+
+void extract_zip(const char *sourcepath, const char *destpath, const char **exclusions) {
+	struct zip *zip;
+	zip_stat_t stat;
+	zip_file_t *file;
+	FILE *out;
+	size_t sum, read;
+	char pathbuf[PATH_MAX];
+	char buf[BUFSIZ];
+	zip = zip_open(sourcepath, 0, NULL);
+	if(!zip) {
+		return;
+	}
+	size_t n = zip_get_num_entries(zip, 0);
+
+	for(size_t i = 0; i < n; i++) {
+		if(zip_stat_index(zip, i, 0, &stat) != 0) {
+			continue;
+		}
+		if(str_starts_with_strv(exclusions, stat.name)) {
+			continue;
+		}
+		file = zip_fopen_index(zip, i, 0);
+		if(!file) {
+			continue;
+		}
+		snprintf(pathbuf, PATH_MAX, "%s/%s", destpath, stat.name);
+		out = fopen_mkdir(pathbuf, "w");
+		if(!out) {
+			zip_fclose(file);
+			continue;
+		}
+
+		sum = 0;
+		while(sum != stat.size) {
+			read = zip_fread(file, buf, sizeof(buf));
+			if(read < 0) {
+				goto cleanup;
+			}
+			fwrite(buf, 1, read, out);
+			sum += read;
+		}
+	cleanup:
+		fclose(out);
+		zip_fclose(file);
+	}
 }

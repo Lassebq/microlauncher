@@ -15,6 +15,7 @@
 #include <gtk/gtk.h>
 #include <linux/limits.h>
 #include <math.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -39,7 +40,9 @@ static GtkEntry *widthEntry;
 static GtkEntry *heightEntry;
 static GtkRevealer *revealer;
 
+static GtkWidget *accountsPage;
 static GtkStringList *accountsList;
+static GtkWidget *instancesPage;
 static GtkStringList *instancesList;
 
 static GtkLabel *msaCodeLabel;
@@ -47,6 +50,8 @@ static GtkLabel *msaHint;
 static GtkProgressBar *msaTimeout;
 static GtkSpinner *msaSpinner;
 static int msaSecondsLeft;
+
+static pid_t instancePid = 0;
 
 static struct Settings *settings;
 
@@ -116,6 +121,20 @@ static void select_instance_dir_event(GtkButton *button, gpointer user_data) {
 	gtk_file_dialog_select_folder(gtk_file_dialog_new(), window, NULL, (GAsyncReadyCallback)select_instance_directory, entry);
 }
 
+static void select_instance_java(GtkFileDialog *dialog, GAsyncResult *res, gpointer data) {
+	GtkEntry *entry = GTK_ENTRY(data);
+	GFile *file = gtk_file_dialog_open_finish(dialog, res, NULL);
+	if(file) {
+		gtk_entry_set_text(entry, g_file_peek_path(file));
+		g_object_unref(file);
+	}
+}
+
+static void select_instance_java_event(GtkButton *button, gpointer user_data) {
+	GtkEntry *entry = GTK_ENTRY(user_data);
+	gtk_file_dialog_open(gtk_file_dialog_new(), window, NULL, (GAsyncReadyCallback)select_instance_java, entry);
+}
+
 static void select_instance_icon(GtkFileDialog *dialog, GAsyncResult *res, gpointer data) {
 	GtkImage *image = GTK_IMAGE(data);
 	GFile *file = gtk_file_dialog_open_finish(dialog, res, NULL);
@@ -142,6 +161,7 @@ static void add_version(gpointer key, struct Version *value, GListStore *store) 
 struct CreateInstance {
 	GtkEntry *instanceName;
 	GtkEntry *instanceDir;
+	GtkEntry *instanceJvm;
 	GtkImage *instanceIcon;
 	GtkColumnView *versionView;
 	GtkWindow *dialog;
@@ -153,6 +173,7 @@ static void create_or_modify_instance(GtkButton *button, void *userdata) {
 	struct Instance *inst = g_new0(struct Instance, 1);
 	inst->name = g_strdup(gtk_entry_get_text(createInstance->instanceName));
 	inst->location = g_strdup(gtk_entry_get_text(createInstance->instanceDir));
+	inst->javaLocation = g_strdup(gtk_entry_get_text(createInstance->instanceJvm));
 	inst->icon = g_strdup(g_object_get_data(G_OBJECT(createInstance->instanceIcon), "icon-location"));
 	GtkSingleSelection *selection = GTK_SINGLE_SELECTION(gtk_column_view_get_model(createInstance->versionView));
 	VersionItem *item = gtk_single_selection_get_selected_item(selection);
@@ -231,6 +252,23 @@ static void microlauncher_modify_instance_window(GtkButton *button, struct Insta
 	gtk_box_append(container, widget);
 	gtk_grid_attach(grid, GTK_WIDGET(container), 2, 1, 1, 1);
 
+	widget = gtk_label_new("Java executable:");
+	gtk_widget_set_halign(widget, GTK_ALIGN_START);
+	gtk_grid_attach(grid, widget, 1, 2, 1, 1);
+
+	widget = gtk_entry_new();
+	entry = GTK_ENTRY(widget);
+	if(instance) {
+		gtk_entry_set_text(entry, instance->javaLocation);
+	}
+	createInstance->instanceJvm = entry;
+	gtk_widget_set_hexpand(widget, true);
+	container = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10));
+	gtk_box_append(container, widget);
+	widget = gtk_button_new_with_label("Select");
+	g_signal_connect(widget, "clicked", G_CALLBACK(select_instance_java_event), entry);
+	gtk_box_append(container, widget);
+	gtk_grid_attach(grid, GTK_WIDGET(container), 2, 2, 1, 1);
 	widget = gtk_label_new("Select version:");
 	gtk_widget_set_halign(widget, GTK_ALIGN_START);
 	gtk_box_append(box, widget);
@@ -421,12 +459,28 @@ static void microlauncher_gui_refresh_instance(void) {
 	gtk_widget_set_sensitive(GTK_WIDGET(playButton), settings->instance && settings->user);
 }
 
+static gboolean microlauncher_gui_enable_play(void *userdata) {
+	instancePid = 0;
+	gtk_button_set_label(playButton, "Play");
+	gtk_widget_set_sensitive(GTK_WIDGET(playButton), true);
+	gtk_widget_set_sensitive(GTK_WIDGET(instancesPage), true);
+	gtk_widget_set_sensitive(GTK_WIDGET(accountsPage), true);
+	return false;
+}
+
 static void launch_instance_thread(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable) {
 	microlauncher_launch_instance(settings->instance, settings->user);
+	g_idle_add(G_SOURCE_FUNC(microlauncher_gui_enable_play), NULL);
 }
 
 static void clicked_play(void) {
+	if(instancePid != 0) {
+		kill(instancePid, SIGKILL);
+		return;
+	}
 	gtk_widget_set_sensitive(GTK_WIDGET(playButton), false);
+	gtk_widget_set_sensitive(GTK_WIDGET(instancesPage), false);
+	gtk_widget_set_sensitive(GTK_WIDGET(accountsPage), false);
 	settings->width = atoi(gtk_entry_buffer_get_text(gtk_entry_get_buffer(widthEntry)));
 	settings->height = atoi(gtk_entry_buffer_get_text(gtk_entry_get_buffer(heightEntry)));
 	settings->fullscreen = gtk_check_button_get_active(checkFullscreen);
@@ -682,6 +736,7 @@ static GtkWidget *microlauncher_gui_page_instances(void) {
 	widget = gtk_button_new_with_label("New instance");
 	g_signal_connect(widget, "clicked", G_CALLBACK(microlauncher_modify_instance_window), NULL);
 	gtk_box_append(GTK_BOX(boxOuter), widget);
+	instancesPage = boxOuter;
 	return boxOuter;
 }
 
@@ -1025,6 +1080,7 @@ static GtkWidget *microlauncher_gui_page_accounts(void) {
 	widget = gtk_button_new_with_label("Add account");
 	g_signal_connect(widget, "clicked", G_CALLBACK(microlauncher_gui_add_account), NULL);
 	gtk_box_append(GTK_BOX(boxOuter), widget);
+	accountsPage = boxOuter;
 	return boxOuter;
 }
 
@@ -1047,8 +1103,15 @@ static gboolean close_request(GtkWindow *self, gpointer user_data) {
 	return true;
 }
 
-static void microlauncher_gui_enable_play(void *userdata) {
+static gboolean microlauncher_gui_enable_kill(void *userdata) {
+	gtk_button_set_label(playButton, "Kill");
 	gtk_widget_set_sensitive(GTK_WIDGET(playButton), true);
+	return false;
+}
+
+static void scheduled_launcher_set_pid(pid_t pid, void *userdata) {
+	instancePid = pid;
+	g_idle_add(G_SOURCE_FUNC(microlauncher_gui_enable_kill), userdata);
 }
 
 static void scheduled_launcher_enable_play(void *userdata) {
@@ -1151,6 +1214,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	microlauncher_gui_refresh_instance();
 	struct Callbacks callbacks = {
 		.instance_finished = scheduled_launcher_enable_play,
+		.instance_started = scheduled_launcher_set_pid,
 		.progress_update = scheduled_progress_update,
 		.stage_update = scheduled_set_stage,
 		.userdata = NULL,

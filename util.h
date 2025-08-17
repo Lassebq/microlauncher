@@ -5,6 +5,14 @@
 #include <stdbool.h>
 #include <stdio.h>
 
+#ifdef __APPLE__
+#define OS_NAME "osx"
+#elif __linux
+#define OS_NAME "linux"
+#elif _WIN32
+#define OS_NAME "windows"
+#endif
+
 typedef char Sha1[SHA_DIGEST_LENGTH * 2 + 1];
 typedef char Sha256[SHA256_DIGEST_LENGTH * 2 + 1];
 
@@ -54,3 +62,5 @@ gconstpointer g_slist_find_custom_value(GSList *list, gconstpointer val, GCompar
 const char *util_basename(const char *path);
 
 char *random_uuid(void);
+
+void extract_zip(const char *sourcepath, const char *destpath, const char **exclusions);

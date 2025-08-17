@@ -21,6 +21,10 @@ void gtk_widget_set_margin(GtkWidget *widget, int top, int bottom, int left, int
 }
 
 void gtk_entry_set_text(GtkEntry *entry, const char *text) {
+	if(!text) {
+		gtk_entry_buffer_set_text(gtk_entry_get_buffer(entry), "", 0);
+		return;
+	}
 	gtk_entry_buffer_set_text(gtk_entry_get_buffer(entry), text, strlen(text));
 }
 

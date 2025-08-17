@@ -34,8 +34,8 @@ bool microlauncher_msa_xboxlive_auth(struct MicrosoftUser *user) {
 	if(json_object_is_type(displayClaims, json_type_object)) {
 		json_object *arr = json_object_object_get(displayClaims, "xui");
 		if(json_object_is_type(arr, json_type_array)) {
-			int n = json_object_array_length(arr);
-			for(int i = 0; i < n; i++) {
+			size_t n = json_object_array_length(arr);
+			for(size_t i = 0; i < n; i++) {
 				json_object *iter = json_object_array_get_idx(arr, i);
 				if(json_object_is_type(iter, json_type_object)) {
 					user->uhs = g_strdup(json_get_string(iter, "uhs"));
@@ -122,10 +122,13 @@ int microlauncher_msa_check_token(const char *postcontent, struct MicrosoftUser 
 	} else if(error != NULL) {
 		return -1;
 	} else {
-		user->access_token = g_strdup(json_get_string(obj, "access_token"));
-		user->refresh_token = g_strdup(json_get_string(obj, "refresh_token"));
-		return 0;
+		if(strequal(json_get_string(obj, "token_type"), "Bearer")) {
+			user->access_token = g_strdup(json_get_string(obj, "access_token"));
+			user->refresh_token = g_strdup(json_get_string(obj, "refresh_token"));
+			return 0;
+		}
 	}
+	return -1;
 }
 
 int microlauncher_msa_device_token(const char *device_code, struct MicrosoftUser *user) {

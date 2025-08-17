@@ -9,7 +9,6 @@ MicroLauncher is a Minecraft launcher implementation for official game client JS
 ## TODO
 
 ### JSON: 
-- Support `rules` object to filter out libraries which aren't required by a platform
 - Support `arguments` array instead of relying on `minecraftArguments` string
 
 ### GUI:

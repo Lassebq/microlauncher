@@ -14,6 +14,7 @@
 #endif
 
 struct Callbacks {
+	void (*instance_started)(pid_t pid, void *userdata);
 	void (*instance_finished)(void *userdata);
 	void (*progress_update)(double precentage, const char *progress_msg, void *userdata);
 	void (*stage_update)(const char *progress_msg, void *userdata);
