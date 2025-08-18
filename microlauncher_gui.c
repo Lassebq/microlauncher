@@ -118,7 +118,12 @@ static void select_instance_directory(GtkFileDialog *dialog, GAsyncResult *res, 
 
 static void select_instance_dir_event(GtkButton *button, gpointer user_data) {
 	GtkEntry *entry = GTK_ENTRY(user_data);
-	gtk_file_dialog_select_folder(gtk_file_dialog_new(), window, NULL, (GAsyncReadyCallback)select_instance_directory, entry);
+	GtkFileDialog *dialog = gtk_file_dialog_new();
+	GFile *file = g_file_new_for_path(gtk_entry_get_text(entry));
+	if(file && g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) == G_FILE_TYPE_DIRECTORY) {
+		gtk_file_dialog_set_initial_folder(dialog, file);
+	}
+	gtk_file_dialog_select_folder(dialog, window, NULL, (GAsyncReadyCallback)select_instance_directory, entry);
 }
 
 static void select_instance_java(GtkFileDialog *dialog, GAsyncResult *res, gpointer data) {
@@ -132,7 +137,12 @@ static void select_instance_java(GtkFileDialog *dialog, GAsyncResult *res, gpoin
 
 static void select_instance_java_event(GtkButton *button, gpointer user_data) {
 	GtkEntry *entry = GTK_ENTRY(user_data);
-	gtk_file_dialog_open(gtk_file_dialog_new(), window, NULL, (GAsyncReadyCallback)select_instance_java, entry);
+	GtkFileDialog *dialog = gtk_file_dialog_new();
+	GFile *file = g_file_new_for_path(gtk_entry_get_text(entry));
+	if(file && g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) == G_FILE_TYPE_REGULAR) {
+		gtk_file_dialog_set_initial_file(dialog, file);
+	}
+	gtk_file_dialog_open(dialog, window, NULL, (GAsyncReadyCallback)select_instance_java, entry);
 }
 
 static void select_instance_icon(GtkFileDialog *dialog, GAsyncResult *res, gpointer data) {
@@ -147,7 +157,12 @@ static void select_instance_icon(GtkFileDialog *dialog, GAsyncResult *res, gpoin
 
 static void icon_released(GtkGestureClick *self, gint n_press, gdouble x, gdouble y, gpointer user_data) {
 	GtkImage *image = GTK_IMAGE(user_data);
-	gtk_file_dialog_open(gtk_file_dialog_new(), window, NULL, (GAsyncReadyCallback)select_instance_icon, image);
+	GtkFileDialog *dialog = gtk_file_dialog_new();
+	GFile *file = g_file_new_for_path(g_object_get_data(G_OBJECT(image), "icon-location"));
+	if(file && g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) == G_FILE_TYPE_REGULAR) {
+		gtk_file_dialog_set_initial_file(dialog, file);
+	}
+	gtk_file_dialog_open(dialog, window, NULL, (GAsyncReadyCallback)select_instance_icon, image);
 }
 
 static void cancel_callback(GtkButton *button, GtkWindow *data) {
