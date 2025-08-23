@@ -13,7 +13,11 @@
 #include <curl/curl.h>
 #include <glib.h>
 #include <gtk/gtk.h>
+#ifdef __linux
 #include <linux/limits.h>
+#elif _WIN32
+#include "processthreadsapi.h"
+#endif
 #include <math.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -51,7 +55,7 @@ static GtkProgressBar *msaTimeout;
 static GtkSpinner *msaSpinner;
 static int msaSecondsLeft;
 
-static pid_t instancePid = 0;
+static GPid instancePid = 0;
 
 static struct Settings *settings;
 
@@ -124,6 +128,7 @@ static void select_instance_dir_event(GtkButton *button, gpointer user_data) {
 		gtk_file_dialog_set_initial_folder(dialog, file);
 	}
 	gtk_file_dialog_select_folder(dialog, window, NULL, (GAsyncReadyCallback)select_instance_directory, entry);
+	g_object_unref(file);
 }
 
 static void select_instance_java(GtkFileDialog *dialog, GAsyncResult *res, gpointer data) {
@@ -131,8 +136,8 @@ static void select_instance_java(GtkFileDialog *dialog, GAsyncResult *res, gpoin
 	GFile *file = gtk_file_dialog_open_finish(dialog, res, NULL);
 	if(file) {
 		gtk_entry_set_text(entry, g_file_peek_path(file));
-		g_object_unref(file);
 	}
+	g_object_unref(file);
 }
 
 static void select_instance_java_event(GtkButton *button, gpointer user_data) {
@@ -143,6 +148,7 @@ static void select_instance_java_event(GtkButton *button, gpointer user_data) {
 		gtk_file_dialog_set_initial_file(dialog, file);
 	}
 	gtk_file_dialog_open(dialog, window, NULL, (GAsyncReadyCallback)select_instance_java, entry);
+	g_object_unref(file);
 }
 
 static void select_instance_icon(GtkFileDialog *dialog, GAsyncResult *res, gpointer data) {
@@ -163,6 +169,7 @@ static void icon_released(GtkGestureClick *self, gint n_press, gdouble x, gdoubl
 		gtk_file_dialog_set_initial_file(dialog, file);
 	}
 	gtk_file_dialog_open(dialog, window, NULL, (GAsyncReadyCallback)select_instance_icon, image);
+	g_object_unref(file);
 }
 
 static void cancel_callback(GtkButton *button, GtkWindow *data) {
@@ -193,11 +200,29 @@ static void create_or_modify_instance(GtkButton *button, void *userdata) {
 	GtkSingleSelection *selection = GTK_SINGLE_SELECTION(gtk_column_view_get_model(createInstance->versionView));
 	VersionItem *item = gtk_single_selection_get_selected_item(selection);
 	inst->version = g_strdup(item->version);
+	bool wasActiveInstance = settings->instance == createInstance->toReplace;
 	if(createInstance->toReplace) {
 		remove_instance(createInstance->toReplace);
 	}
 	add_instance(inst);
+	if(wasActiveInstance) {
+		settings->instance = inst;
+	}
+	microlauncher_gui_refresh_instance();
 	gtk_window_destroy(createInstance->dialog);
+}
+
+// I should not need to workaround this once the approriate GTK bug is fixed. https://gitlab.gnome.org/GNOME/gtk/-/issues/6747
+struct TryScroll {
+	GtkColumnView *colView;
+	guint row;
+};
+
+static gboolean try_scroll_to(struct TryScroll *tryScroll) {
+	GtkScrollInfo *scrollInfo = gtk_scroll_info_new();
+	gtk_scroll_info_set_enable_vertical(scrollInfo, true);
+	gtk_column_view_scroll_to(tryScroll->colView, tryScroll->row, NULL, GTK_LIST_SCROLL_SELECT | GTK_LIST_SCROLL_FOCUS, scrollInfo);
+	return false;
 }
 
 static void microlauncher_modify_instance_window(GtkButton *button, struct Instance *instance) {
@@ -211,7 +236,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, struct Insta
 	createInstance->toReplace = instance;
 	createInstance->dialog = newWindow;
 	gtk_window_set_title(newWindow, instance ? "Modify instance" : "New instance");
-	gtk_window_set_default_size(newWindow, 600, 400);
+	gtk_window_set_default_size(newWindow, 640, 700);
 	widget = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
 	gtk_widget_set_margin(widget, 10, 10, 10, 10);
 	box = GTK_BOX(widget);
@@ -296,8 +321,9 @@ static void microlauncher_modify_instance_window(GtkButton *button, struct Insta
 	GHashTable *manifest = microlauncher_get_manifest();
 	g_hash_table_foreach(manifest, (GHFunc)add_version, store);
 	widget = gtk_column_view_new(NULL);
-	createInstance->versionView = GTK_COLUMN_VIEW(widget);
-	gtk_column_view_set_show_column_separators(GTK_COLUMN_VIEW(widget), true);
+	GtkColumnView *columnView = GTK_COLUMN_VIEW(widget);
+	createInstance->versionView = columnView;
+	gtk_column_view_set_show_column_separators(columnView, true);
 
 	GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
 	g_signal_connect(factory, "setup", G_CALLBACK(setup_column_cb), NULL);
@@ -306,7 +332,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, struct Insta
 	GtkSorter *sorter = GTK_SORTER(gtk_string_sorter_new(gtk_property_expression_new(MICROLAUNCHER_VERSION_ITEM_TYPE, NULL, "version")));
 	gtk_column_view_column_set_sorter(column, GTK_SORTER(sorter));
 	gtk_column_view_column_set_resizable(column, true);
-	gtk_column_view_append_column(GTK_COLUMN_VIEW(widget), column);
+	gtk_column_view_append_column(columnView, column);
 
 	factory = gtk_signal_list_item_factory_new();
 	g_signal_connect(factory, "setup", G_CALLBACK(setup_column_cb), NULL);
@@ -315,7 +341,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, struct Insta
 	sorter = GTK_SORTER(gtk_string_sorter_new(gtk_property_expression_new(MICROLAUNCHER_VERSION_ITEM_TYPE, NULL, "type")));
 	gtk_column_view_column_set_sorter(column, GTK_SORTER(sorter));
 	gtk_column_view_column_set_resizable(column, true);
-	gtk_column_view_append_column(GTK_COLUMN_VIEW(widget), column);
+	gtk_column_view_append_column(columnView, column);
 
 	factory = gtk_signal_list_item_factory_new();
 	g_signal_connect(factory, "setup", G_CALLBACK(setup_column_cb), NULL);
@@ -325,24 +351,13 @@ static void microlauncher_modify_instance_window(GtkButton *button, struct Insta
 	gtk_column_view_column_set_expand(column, true);
 	gtk_column_view_column_set_sorter(column, GTK_SORTER(sorter));
 	gtk_column_view_column_set_resizable(column, true);
-	gtk_column_view_append_column(GTK_COLUMN_VIEW(widget), column);
-	gtk_column_view_sort_by_column(GTK_COLUMN_VIEW(widget), column, GTK_SORT_DESCENDING);
+	gtk_column_view_append_column(columnView, column);
+	gtk_column_view_sort_by_column(columnView, column, GTK_SORT_DESCENDING);
 
-	sorter = g_object_ref(gtk_column_view_get_sorter(GTK_COLUMN_VIEW(widget)));
+	sorter = g_object_ref(gtk_column_view_get_sorter(columnView));
 	GtkSortListModel *model = gtk_sort_list_model_new(G_LIST_MODEL(store), sorter);
 	GtkSingleSelection *selection = gtk_single_selection_new(G_LIST_MODEL(model));
-	gtk_column_view_set_model(GTK_COLUMN_VIEW(widget), GTK_SELECTION_MODEL(selection));
-	if(instance) {
-		guint n = g_list_model_get_n_items(G_LIST_MODEL(model));
-		for(guint i = 0; i < n; i++) {
-			VersionItem *item = g_list_model_get_item(G_LIST_MODEL(model), i);
-			if(strequal(instance->version, item->version)) {
-				gtk_single_selection_set_selected(selection, i);
-				break;
-			}
-		}
-	}
-
+	gtk_column_view_set_model(columnView, GTK_SELECTION_MODEL(selection));
 	gtk_scrolled_window_set_child(scrolledWindow, widget);
 	gtk_box_append(box, GTK_WIDGET(scrolledWindow));
 
@@ -356,6 +371,22 @@ static void microlauncher_modify_instance_window(GtkButton *button, struct Insta
 	gtk_widget_set_hexpand(widget, true);
 	g_signal_connect_data(widget, "clicked", G_CALLBACK(create_or_modify_instance), createInstance, (GClosureNotify)g_free, 0);
 	gtk_box_append(container, widget);
+
+	struct TryScroll *tryScroll = g_new0(struct TryScroll, 1);
+	tryScroll->colView = columnView;
+	if(instance) {
+		guint n = g_list_model_get_n_items(G_LIST_MODEL(model));
+		for(guint i = 0; i < n; i++) {
+			VersionItem *item = g_list_model_get_item(G_LIST_MODEL(model), i);
+			if(strequal(instance->version, item->version)) {
+				// gtk_single_selection_set_selected(selection, i);
+				tryScroll->row = i;
+				break;
+			}
+		}
+	}
+	g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, (GSourceFunc)try_scroll_to, tryScroll, g_free);
+
 	gtk_box_append(box, GTK_WIDGET(container));
 
 	gtk_window_present(newWindow);
@@ -490,7 +521,7 @@ static void launch_instance_thread(GTask *task, gpointer source_object, gpointer
 
 static void clicked_play(void) {
 	if(instancePid != 0) {
-		kill(instancePid, SIGKILL);
+		util_kill_process(instancePid);
 		return;
 	}
 	gtk_widget_set_sensitive(GTK_WIDGET(playButton), false);
@@ -872,8 +903,11 @@ static void check_device_code(GTask *task, gpointer source_object, gpointer task
 		user->type = ACCOUNT_TYPE_MSA;
 		user->id = random_uuid();
 		g_idle_add(G_SOURCE_FUNC(gtk_window_close), popupWindow);
-		microlauncher_auth_user(user);
-		g_idle_add(G_SOURCE_FUNC(add_account_in_main), user);
+		if(microlauncher_auth_user(user)) {
+			g_idle_add(G_SOURCE_FUNC(add_account_in_main), user);
+		} else {
+			free(user);
+		}
 		msaSecondsLeft = 1;
 	}
 }
@@ -1124,7 +1158,7 @@ static gboolean microlauncher_gui_enable_kill(void *userdata) {
 	return false;
 }
 
-static void scheduled_launcher_set_pid(pid_t pid, void *userdata) {
+static void scheduled_launcher_set_pid(GPid pid, void *userdata) {
 	instancePid = pid;
 	g_idle_add(G_SOURCE_FUNC(microlauncher_gui_enable_kill), userdata);
 }
@@ -1185,7 +1219,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	window = GTK_WINDOW(gtk_window_new());
 	gtk_application_add_window(app, window);
 	gtk_window_set_default_size(window, 0, 480);
-	gtk_window_set_title(window, "MicroLauncher - Minecraft Launcher");
+	gtk_window_set_title(window, LAUNCHER_NAME " - Minecraft Launcher");
 
 	box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_window_set_child(window, box);

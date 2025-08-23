@@ -11,17 +11,14 @@
 #include "xdgutil.h"
 #include <curl/curl.h>
 #include <curl/easy.h>
-#include <linux/limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
-#include <uuid.h>
 #include <zip.h>
 
 static GSList *instances;
@@ -222,13 +219,19 @@ bool microlauncher_init(int argc, char **argv) {
 	if(!microlauncher_init_config()) {
 		fprintf(stdout, "No config, using fresh config\n");
 	}
-	json_object *manifestJson = microlauncher_http_get_json(BETTERJSONS_MANIFEST, NULL, NULL);
+	const char *manifest_url;
+#ifdef USE_MOJANG_MANIFEST
+	manifest_url = MOJANG_MANIFEST;
+#else
+	manifest_url = BETTERJSONS_MANIFEST;
+#endif
+	json_object *manifestJson = microlauncher_http_get_json(manifest_url, NULL, NULL);
 	manifest = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, microlauncher_version_destroy);
 
 	snprintf(path, PATH_MAX, "%s/versions", settings.launcher_root);
 	GDir *dir = g_dir_open(path, 0, NULL);
 	const char *filename;
-	while((filename = g_dir_read_name(dir))) {
+	while(dir && (filename = g_dir_read_name(dir))) {
 		snprintf(path, PATH_MAX, "%s/versions/%s/%s.json", settings.launcher_root, filename, filename);
 		if(access(path, F_OK) == 0) {
 			json_object *obj = json_from_file(path);
@@ -262,7 +265,12 @@ GHashTable *microlauncher_get_manifest(void) {
 
 size_t write_callback(void *ptr, size_t size, size_t nmemb, void *userdata) {
 	FILE *file = (FILE *)userdata;
-	return fwrite(ptr, size, nmemb, file) * size;
+	return fwrite(ptr, size, nmemb, file);
+}
+
+void microlauncher_set_curl_opts(CURL *curl) {
+	curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA);
+	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, CURLFOLLOW_ALL);
 }
 
 bool microlauncher_http_get_with_handle(CURL *curl, const char *url, const char *save_location) {
@@ -270,13 +278,14 @@ bool microlauncher_http_get_with_handle(CURL *curl, const char *url, const char 
 	if(!curl) {
 		return false;
 	}
-	FILE *file = fopen_mkdir(save_location, "w");
+	FILE *file = fopen_mkdir(save_location, "wb");
 	if(!file) {
 		return false;
 	}
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, file);
+	microlauncher_set_curl_opts(curl);
 	code = curl_easy_perform(curl);
 	fclose(file);
 	return code == CURLE_OK;
@@ -302,10 +311,13 @@ json_object *microlauncher_http_get_json(const char *url, struct curl_slist *hea
 	if(!curl) {
 		return NULL;
 	}
+	char buff[CURL_ERROR_SIZE];
 	String str = string_new(NULL);
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback_string);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &str);
+	microlauncher_set_curl_opts(curl);
+	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, buff);
 	if(headers) {
 		curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
 	}
@@ -318,6 +330,9 @@ json_object *microlauncher_http_get_json(const char *url, struct curl_slist *hea
 	if(code == CURLE_OK) {
 		obj = json_tokener_parse(str.data);
 		string_destroy(&str);
+	} else {
+		g_print("CURL error (%d) on %s\n", code, url);
+		g_print("%s\n", buff);
 	}
 	return obj;
 }
@@ -326,18 +341,6 @@ json_object *microlauncher_http_get_json_and_save(const char *url, const char *s
 	json_object *obj = microlauncher_http_get_json(url, NULL, NULL);
 	json_to_file(obj, save_location, JSON_C_TO_STRING_NOSLASHESCAPE);
 	return obj;
-}
-
-void microlauncher_json_save(json_object *obj, const char *location) {
-	FILE *file = fopen(location, "w");
-	size_t written = 0;
-	size_t n = BUFSIZ;
-	const char *str = json_object_to_json_string(obj);
-	while(str[written]) {
-		n = strnlen(str + written, BUFSIZ);
-		written += fwrite(str + written, 1, n, file);
-	}
-	fclose(file);
 }
 
 char *microlauncher_get_library_path(const char *name, const char *classifier, char *path) {
@@ -379,7 +382,7 @@ void microlauncher_fetch_artifact(const char *url, const char *path, const char 
 		goto redownload;
 	}
 	Sha1 hash;
-	FILE *fd = fopen(path, "r");
+	FILE *fd = fopen(path, "rb");
 	if(!fd) {
 		goto redownload;
 	}
@@ -392,7 +395,9 @@ void microlauncher_fetch_artifact(const char *url, const char *path, const char 
 redownload:
 	if(url) {
 		/* Sharing curl handle has better performance, but doesn't work in multithreaded scenario */
-		microlauncher_http_get_with_handle(globalCurlHandle, url, path);
+		if(!microlauncher_http_get_with_handle(globalCurlHandle, url, path)) {
+			g_print("CURL error on %s\n", url);
+		}
 	}
 }
 
@@ -519,8 +524,8 @@ static enum RuleAction get_action(const char *str) {
 	return RULE_ACTION_ALLOW;
 }
 
-static bool check_rules(json_object *rules) {
-	json_object *iter, *os;
+static bool check_rules(json_object *rules, GSList *featuresList) {
+	json_object *iter, *os, *features;
 	enum RuleAction action, appliedAction;
 	if(!json_object_is_type(rules, json_type_array)) {
 		return true;
@@ -531,7 +536,7 @@ static bool check_rules(json_object *rules) {
 		iter = json_object_array_get_idx(rules, i);
 		action = get_action(json_get_string(iter, "action"));
 		os = json_object_object_get(iter, "os");
-		if(os) {
+		if(json_object_is_type(os, json_type_object)) {
 			if(!strequal(json_get_string(os, "name"), OS_NAME)) {
 				continue;
 			}
@@ -539,10 +544,27 @@ static bool check_rules(json_object *rules) {
 			// if(re_match(json_get_string(os, "version"), /* FIXME */ osVersion, &matchlength) == -1) {
 			// 	continue;
 			// }
-			appliedAction = action;
-		} else {
-			appliedAction = action;
 		}
+		features = json_object_object_get(iter, "features");
+		if(json_object_is_type(features, json_type_object)) {
+			if(featuresList == NULL)
+				continue;
+			bool hasFeatures = true;
+			json_object_object_foreach(features, key, val) {
+				if(!json_object_get_boolean(val)) {
+					hasFeatures = false;
+					break;
+				}
+				if(!g_slist_find_custom(featuresList, key, (GCompareFunc)strcmp)) {
+					hasFeatures = false;
+					break;
+				}
+			}
+			if(!hasFeatures) {
+				continue;
+			}
+		}
+		appliedAction = action;
 	}
 	return appliedAction == RULE_ACTION_ALLOW;
 }
@@ -569,7 +591,7 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 
 		for(size_t i = 0; i < length; i++) {
 			iter = json_object_array_get_idx(libraries, i);
-			if(!check_rules(json_object_object_get(iter, "rules"))) {
+			if(!check_rules(json_object_object_get(iter, "rules"), NULL)) {
 				continue;
 			}
 			downloads = json_object_object_get(iter, "downloads");
@@ -605,7 +627,7 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 
 		for(size_t i = 0; i < length; i++) {
 			iter = json_object_array_get_idx(libraries, i);
-			if(check_rules(json_object_object_get(iter, "rules"))) {
+			if(check_rules(json_object_object_get(iter, "rules"), NULL)) {
 				microlauncher_fetch_library(iter, libraries_path, natives_path, total_size, &current_size);
 			}
 		}
@@ -648,7 +670,7 @@ char *microlauncher_get_javacp(json_object *json, const char *versions_path, con
 
 		for(size_t i = 0; i < length; i++) {
 			iter = json_object_array_get_idx(libraries, i);
-			if(!check_rules(json_object_object_get(iter, "rules"))) {
+			if(!check_rules(json_object_object_get(iter, "rules"), NULL)) {
 				continue;
 			}
 			downloads = json_object_object_get(iter, "downloads");
@@ -658,7 +680,11 @@ char *microlauncher_get_javacp(json_object *json, const char *versions_path, con
 			if(!libpath) {
 				libpath = microlauncher_get_library_path(name, NULL, path);
 			}
+#ifdef _WIN32
+			string_append_char(&str, ';');
+#else
 			string_append_char(&str, ':');
+#endif
 			string_append(&str, libraries_path);
 			string_append_char(&str, '/');
 			string_append(&str, libpath);
@@ -689,7 +715,20 @@ void microlauncher_load_settings(void) {
 	settings.demo = json_get_bool(obj, "demo");
 	settings.width = json_get_int(obj, "width");
 	settings.height = json_get_int(obj, "height");
-	settings.launcher_root = g_strdup_printf("%s/minecraft", XDG_DATA_HOME);
+	const char *root = getenv("MICROLAUNCHER_LAUNCHER_ROOT");
+	if(root) {
+		settings.launcher_root = g_strdup(root);
+	} else if((root = json_get_string(obj, "launcherRoot"))) {
+		settings.launcher_root = g_strdup(root);
+	} else {
+#ifdef _WIN32
+		/* %appdata%/.minecraft */
+		settings.launcher_root = g_strdup_printf("%s/.minecraft", XDG_DATA_HOME);
+#else
+		/* ~/.local/share/minecraft */
+		settings.launcher_root = g_strdup_printf("%s/minecraft", XDG_DATA_HOME);
+#endif
+	}
 	json_object_put(obj);
 }
 
@@ -708,6 +747,9 @@ void microlauncher_save_settings(void) {
 	json_set_int(obj, "height", settings.height);
 	json_set_bool(obj, "fullscreen", settings.fullscreen);
 	json_set_bool(obj, "demo", settings.demo);
+	if(settings.launcher_root) {
+		json_set_string(obj, "launcherRoot", settings.launcher_root);
+	}
 
 	snprintf(pathbuf, PATH_MAX, "%s/microlauncher/settings.json", XDG_DATA_HOME);
 	json_to_file(obj, pathbuf, JSON_C_TO_STRING_NOSLASHESCAPE | JSON_C_TO_STRING_PRETTY);
@@ -789,10 +831,58 @@ bool microlauncher_auth_user(struct User *user) {
 	return b;
 }
 
+static char *apply_replaces(const char *const *replaces, const char *str) {
+	int i = 0;
+	String strBuff = string_new(str);
+	while(replaces[i]) {
+		replace_str(&strBuff, replaces[i], replaces[i + 1]);
+		i += 2;
+	}
+	return strBuff.data;
+}
+
+static int add_arguments(json_object *array, const char *const *replaces, GSList *features, char **argv, char **str_to_free) {
+	json_object *iter;
+
+	size_t len = json_object_array_length(array);
+	int j = 0;
+	for(size_t i = 0; i < len; i++) {
+		iter = json_object_array_get_idx(array, i);
+		switch(json_object_get_type(iter)) {
+			case json_type_object:
+				if(check_rules(json_object_object_get(iter, "rules"), features)) {
+					argv[j] = str_to_free[j] = apply_replaces(replaces, json_get_string(iter, "value"));
+					j++;
+				}
+				break;
+			case json_type_string:
+				if(strstr(json_object_get_string(iter), "xuid")) {
+					break;
+				}
+				if(strstr(json_object_get_string(iter), "clientId")) {
+					break;
+				}
+				if(strstr(json_object_get_string(iter), "clientid")) {
+					break;
+				}
+
+				argv[j] = str_to_free[j] = apply_replaces(replaces, json_object_get_string(iter));
+				j++;
+				break;
+			default:
+				break;
+		}
+	}
+	return j;
+}
+
 bool microlauncher_launch_instance(const struct Instance *instance, struct User *user) {
 	if(!instance || !user) {
 		return false;
 	}
+	bool ret = false;
+	int m = 0;
+	char *malloc_strs[1024];
 	char path[PATH_MAX];
 	char versions_dir[PATH_MAX];
 	char libraries_dir[PATH_MAX];
@@ -812,113 +902,128 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	}
 	const char *id = json_get_string(json, "id");
 	const char *minecraftArguments = json_get_string(json, "minecraftArguments");
+	char *cp = microlauncher_get_javacp(json, versions_dir, libraries_dir);
 	json_object *arguments = json_object_object_get(json, "arguments");
+	json_object *argumentsGame = json_object_object_get(arguments, "game");
+	json_object *argumentsJvm = json_object_object_get(arguments, "jvm");
 	int n = 1;
 	n += user->accessToken ? strlen(user->accessToken) : 0;
 	n += user->uuid ? strlen(user->uuid) : 0;
 	n += strlen("token::");
 	char auth_session[n];
 	snprintf(auth_session, sizeof(auth_session), "token:%s:%s", user->accessToken ? user->accessToken : "", user->uuid ? user->uuid : "");
+	char width_str[11];
+	snprintf(width_str, sizeof(width_str), "%d", settings.width);
+	char height_str[11];
+	snprintf(height_str, sizeof(height_str), "%d", settings.height);
+
 	const char *replaces[] = {
 		"${auth_player_name}", user->name,
 		"${auth_session}", auth_session,
 		"${auth_uuid}", user->uuid,
+		"${auth_xuid}", "0",
+		"${clientid}", "-",
 		"${version_name}", id,
 		"${game_directory}", instance->location,
 		"${assets_root}", assets_dir,
 		"${assets_index_name}", json_get_string(json, "assets"),
 		"${auth_access_token}", user->accessToken,
 		"${user_properties}", "{}",
-		"${user_type}", "legacy",
+		"${user_type}", user->type == ACCOUNT_TYPE_MSA ? "msa" : "legacy",
 		"${version_type}", json_get_string(json, "type"),
+		"${launcher_name}", LAUNCHER_NAME,
+		"${launcher_version}", LAUNCHER_VERSION,
+		"${classpath}", cp,
+		"${natives_directory}", natives_dir,
+		"${resolution_width}", width_str,
+		"${resolution_height}", height_str,
+		"${instance_icon}", instance->icon,
+		// TODO quickplay
 		NULL};
-	int c = 0, i = 0;
-	char *cp = microlauncher_get_javacp(json, versions_dir, libraries_dir);
+	GSList *features = NULL;
+	features = g_slist_append(features, g_strdup("has_custom_resolution"));
+	if(settings.demo) {
+		features = g_slist_append(features, g_strdup("is_demo_user"));
+	}
+	int c = 0;
 	main_class = json_get_string(json, "mainClass");
 
 	c = 0;
-	int m = 0;
-	char *argv_malloc[256];
 	char *argv[256];
 	argv[c++] = instance->javaLocation ? instance->javaLocation : "java"; /* Try java from path unless explicitly set */
-	// JVM args
-	// argv[c++] = "-Dorg.lwjgl.glfw.libname=/usr/lib/libglfw.so";
-	snprintf(path, PATH_MAX, "-Djava.library.path=%s", natives_dir);
-	argv[c++] = path;
-	argv[c++] = "-cp";
-	argv[c++] = cp;
+// JVM args
+#ifdef __linux
+	argv[c++] = "-Dorg.lwjgl.glfw.libname=/usr/lib/libglfw.so";
+#endif
+	if(json_object_is_type(argumentsJvm, json_type_array)) {
+		int k = add_arguments(argumentsJvm, replaces, features, argv + c, malloc_strs + m);
+		c += k;
+		m += k;
+	} else {
+		snprintf(path, PATH_MAX, "-Djava.library.path=%s", natives_dir);
+		argv[c++] = path;
+		argv[c++] = "-cp";
+		argv[c++] = cp;
+	}
 	argv[c++] = (char *)main_class;
 
 	// Game args
-	char *gameArgs[255 - c];
-	if(!minecraftArguments && !json_object_is_type(arguments, json_type_array)) {
-		return false;
-	}
-	char *str = g_strdup(minecraftArguments);
-	int argsCount = strsplit(str, ' ', gameArgs, 255 - c);
-	for(int j = 0; j < argsCount; j++) {
-		i = 0;
-
-		String strBuff = string_new(gameArgs[j]);
-		while(replaces[i]) {
-			replace_str(&strBuff, replaces[i], replaces[i + 1]);
-			i += 2;
+	if(json_object_is_type(argumentsGame, json_type_array)) {
+		int k = add_arguments(argumentsGame, replaces, features, argv + c, malloc_strs + m);
+		c += k;
+		m += k;
+	} else {
+		if(!minecraftArguments) {
+			goto cleanup;
 		}
-		argv[c++] = argv_malloc[m++] = strdup(strBuff.data);
-		string_destroy(&strBuff);
+		char *gameArgs[255 - c];
+		char *str = g_strdup(minecraftArguments);
+		int argsCount = strsplit(str, ' ', gameArgs, 255 - c);
+		for(int i = 0; i < argsCount; i++) {
+			argv[c++] = malloc_strs[m++] = apply_replaces(replaces, gameArgs[i]);
+		}
+		free(str);
+		if(settings.fullscreen) {
+			argv[c++] = "--fullscreen";
+		}
+		if(settings.width != 0) {
+			argv[c++] = "--width";
+			argv[c++] = width_str;
+		}
+		if(settings.height != 0) {
+			argv[c++] = "--height";
+			argv[c++] = height_str;
+		}
+		if(settings.demo) {
+			argv[c++] = "--demo";
+		}
 	}
-	free(str);
-	if(settings.fullscreen) {
-		argv[c++] = "--fullscreen";
-	}
-	if(settings.width != 0) {
-		argv[c++] = "--width";
-		argv[c] = argv_malloc[m++] = malloc(11);
-		snprintf(argv[c], 11, "%d", settings.width);
-		c++;
-	}
-	if(settings.height != 0) {
-		argv[c++] = "--height";
-		argv[c] = argv_malloc[m++] = malloc(11);
-		snprintf(argv[c], 11, "%d", settings.height);
-		c++;
-	}
-	if(settings.demo) {
-		argv[c++] = "--demo";
-	}
-	argv[c++] = "--brand";
-	argv[c++] = "vanilla";
 	argv[c] = NULL;
 
-	int j = 0;
-	while(argv[j]) {
-		g_print("%s\n", argv[j]);
-		j++;
+	ret = true;
+	for(int i = 0; i < c; i++) {
+		g_print("%s\n", argv[i]);
 	}
+	GPid pid = util_fork_execv(instance->location, argv);
 
-	pid_t pid = fork();
-	if(pid == 0) {
-		chdir(instance->location);
-		execvp(argv[0], argv);
-		// execv should not return
-		_exit(EXIT_FAILURE);
-	}
 	run_callback(instance_started, pid);
-	int status;
-	waitpid(pid, &status, 0);
-	if(WIFEXITED(status)) {
-		g_print("Process exited with code %d", WEXITSTATUS(status));
+	int status = 0;
+	if(util_waitpid(pid, &status)) {
+		g_print("Process exited with code %d\n", status);
+	} else {
+		g_print("Process exited abnormally\n");
 	}
 	if(callbacks.instance_finished) {
 		callbacks.instance_finished(callbacks.userdata);
 	}
+cleanup:
 
 	for(int i = 0; i < m; i++) {
-		free(argv_malloc[i]);
+		free(malloc_strs[i]);
 	}
 	free(cp);
 	json_object_put(json);
-	return true;
+	return ret;
 }
 
 void microlauncher_set_callbacks(struct Callbacks cb) {

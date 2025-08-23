@@ -64,3 +64,9 @@ const char *util_basename(const char *path);
 char *random_uuid(void);
 
 void extract_zip(const char *sourcepath, const char *destpath, const char **exclusions);
+
+GPid util_fork_execv(const char *dir, char *const *argv);
+
+bool util_waitpid(GPid pid, int *status);
+
+bool util_kill_process(GPid pid);

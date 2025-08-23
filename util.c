@@ -1,14 +1,20 @@
-#include "glib.h"
-#include "json_tokener.h"
-#include "uuid.h"
-#include <errno.h>
+#include <glib.h>
+#ifdef __linux
 #include <linux/limits.h>
+#endif
+#ifdef __unix
+#include "uuid.h"
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+#ifdef __WIN32
+#include <processthreadsapi.h>
+#include <windows.h>
+#include <winscard.h>
+#endif
 #include <openssl/sha.h>
 #include <stdbool.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 #include <util.h>
 #include <zip.h>
 
@@ -74,23 +80,15 @@ void string_destroy(String *str) {
 }
 
 FILE *fopen_mkdir(const char *path, const char *mode) {
-	char *p = strdup(path);
-	char *sep = strchr(p + 1, '/');
-	while(sep != NULL) {
-		*sep = '\0';
-		if(mkdir(p, 0755) && errno != EEXIST) {
-			fprintf(stderr, "error while trying to create %s\n", p);
-		}
-		*sep = '/';
-		sep = strchr(sep + 1, '/');
+	if(g_mkdir_with_parents(g_path_get_dirname(path), 755) != 0) {
+		return NULL;
 	}
-	free(p);
 	return fopen(path, mode);
 }
 
 char *read_file_as_string(const char *path) {
 	String str = string_new(NULL);
-	FILE *file = fopen(path, "r");
+	FILE *file = fopen(path, "rb");
 	if(!file) {
 		return NULL;
 	}
@@ -99,11 +97,12 @@ char *read_file_as_string(const char *path) {
 	while((n = fread(buff, 1, BUFSIZ, file))) {
 		string_append_n(&str, buff, n);
 	}
+	fclose(file);
 	return str.data;
 }
 
 bool write_string_to_file(const char *str, const char *path) {
-	FILE *file = fopen_mkdir(path, "w");
+	FILE *file = fopen_mkdir(path, "wb");
 	if(!file) {
 		return false;
 	}
@@ -242,11 +241,21 @@ const char *util_basename(const char *path) {
 }
 
 char *random_uuid(void) {
-	char *str = malloc(36); /* length of uuid with hyphens and null terminator */
+	char *str = malloc(39);
 	uuid_t uuid;
+#ifdef _WIN32
+	OLECHAR widestr[39];
+	CoCreateGuid(&uuid);
+	StringFromGUID2(&uuid, widestr, 39); // "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}"
+	wcstombs(str, widestr, 39);
+	/* Remove surrounding brackets */
+	str[37] = '\0';
+	return str + 1;
+#else
 	uuid_generate_random(uuid);
 	uuid_unparse_lower(uuid, str);
 	return str;
+#endif
 }
 
 static bool str_starts_with_strv(const char **strv, const char *str) {
@@ -285,7 +294,7 @@ void extract_zip(const char *sourcepath, const char *destpath, const char **excl
 			continue;
 		}
 		snprintf(pathbuf, PATH_MAX, "%s/%s", destpath, stat.name);
-		out = fopen_mkdir(pathbuf, "w");
+		out = fopen_mkdir(pathbuf, "wb");
 		if(!out) {
 			zip_fclose(file);
 			continue;
@@ -304,4 +313,120 @@ void extract_zip(const char *sourcepath, const char *destpath, const char **excl
 		fclose(out);
 		zip_fclose(file);
 	}
+}
+
+char *get_escaped_command(char *const *cmdline) {
+	String str = string_new(NULL);
+	size_t i = 0;
+	size_t argstart;
+	int ch;
+	bool toquote;
+	char *const *arg = cmdline;
+	while(*arg) {
+		argstart = i;
+		const char *argchr = *arg;
+		toquote = strchr(*arg, ' ') != NULL;
+		if(toquote) {
+			string_append_char(&str, '"');
+		}
+		string_append_n(&str, *arg, strlen(*arg));
+		if(toquote) {
+			string_append_char(&str, '"');
+		}
+		arg++;
+		if(*arg) {
+			string_append_char(&str, ' ');
+		}
+	}
+	return str.data;
+}
+
+char **get_commandv(char *cmdline) {
+	if(!cmdline || strnlen(cmdline, 1) == 0) {
+		return NULL;
+	}
+	char *cmdv[256];
+	char *pointer, *token_start;
+	char **heap;
+	size_t i = 0;
+	bool escapeNext = false;
+	bool quoted = false;
+	pointer = cmdline;
+	token_start = pointer;
+	for(; *pointer != '\0'; pointer++) {
+		char ch = *pointer;
+		if(ch == '"') {
+			if(!quoted) {
+				token_start++;
+			} else {
+				*pointer = '\0';
+			}
+			quoted = !quoted;
+			continue;
+		}
+		if(ch == ' ' && !quoted) {
+			*pointer = '\0';
+			cmdv[i++] = token_start;
+			token_start = pointer + 1;
+			continue;
+		}
+	}
+	cmdv[i++] = token_start;
+	cmdv[i++] = NULL;
+	heap = malloc(sizeof(void *) * i);
+	memcpy(heap, cmdv, i);
+	return heap;
+}
+
+GPid util_fork_execv(const char *dir, char *const *argv) {
+#ifndef _WIN32
+	GPid pid = fork();
+	if(pid == 0) {
+		chdir(dir);
+		execvp(argv[0], argv);
+		_exit(EXIT_FAILURE);
+	}
+	return pid;
+#else
+	STARTUPINFO si = {0};
+	PROCESS_INFORMATION pi = {0};
+	char *cmdline = get_escaped_command(argv);
+	if(CreateProcessA(NULL, cmdline, NULL, NULL, false, 0, NULL, dir, &si, &pi)) {
+		CloseHandle(pi.hThread);
+		return pi.hProcess;
+	} else {
+		return NULL;
+	}
+#endif
+}
+
+bool util_waitpid(GPid pid, int *exitcode) {
+#ifndef _WIN32
+	int status;
+	waitpid(pid, &status, 0);
+	if(WIFEXITED(status)) {
+		*exitcode = WEXITSTATUS(status);
+		return true;
+	} else {
+		return false;
+	}
+#else
+	DWORD exitCode = 0;
+	HANDLE procHandle = (HANDLE)pid;
+	WaitForSingleObject(procHandle, INFINITE);
+	if(GetExitCodeProcess(procHandle, &exitCode)) {
+		*exitcode = exitCode;
+	} else {
+		g_print("Process exited abnormally");
+	}
+	CloseHandle(procHandle);
+#endif
+}
+
+bool util_kill_process(GPid pid) {
+#ifdef __linux
+	return kill(pid, SIGKILL) == 0;
+#elif __WIN32
+	return TerminateProcess((HANDLE)pid, 0);
+#endif
 }

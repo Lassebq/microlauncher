@@ -27,16 +27,23 @@ m_dep = cc.find_library('m', required : false)
 
 deps = [
   dependency('gtk4', version: '>= 4.0'),
+  dependency('gio-2.0'),
+  dependency('glib-2.0'),
+  dependency('gobject-2.0'),
   dependency('libcurl'),
   dependency('libcrypto'),
-  dependency('uuid'),
+  # dependency('uuid'),
   dependency('json-c'),
   dependency('libzip'),
+  cc.find_library('ssp', static: true),
   m_dep
 ]
+foreach dep : deps 
 
+endforeach
 exe = executable('microlauncher', sources,
   dependencies: deps,
+  c_args: ['-fno-stack-protector'],
   # include_directories: include_directories,
   install : true
 )

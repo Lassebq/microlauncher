@@ -1,7 +1,6 @@
 #pragma once
 
 #include "glib.h"
-#include "uuid.h"
 #include <curl/curl.h>
 #include <json_types.h>
 #include <stdbool.h>
@@ -13,8 +12,10 @@
 #define MICROSOFT_CLIENT_ID "95984717-05f1-4b52-8a66-064d0e1e5b55"
 #endif
 
+#define LAUNCHER_NAME "MicroLauncher"
+
 struct Callbacks {
-	void (*instance_started)(pid_t pid, void *userdata);
+	void (*instance_started)(GPid pid, void *userdata);
 	void (*instance_finished)(void *userdata);
 	void (*progress_update)(double precentage, const char *progress_msg, void *userdata);
 	void (*stage_update)(const char *progress_msg, void *userdata);

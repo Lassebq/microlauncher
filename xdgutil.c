@@ -1,9 +1,15 @@
 #include "xdgutil.h"
+#include "glib.h"
+#ifdef __linux__
 #include "linux/limits.h"
+#include <pwd.h>
+#elif _WIN32
+#include <shlobj.h>
+#include <windows.h>
+#endif
 #include "stdbool.h"
 #include "stdio.h"
 #include "stdlib.h"
-#include <pwd.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -13,25 +19,50 @@ char *XDG_CONFIG_HOME;
 char *XDG_CACHE_HOME;
 
 bool xdgutil_init(void) {
+	char dir[PATH_MAX];
+
 	HOME = getenv("HOME");
 	if(!HOME) {
+#ifdef _WIN32
+		if(SHGetFolderPathA(NULL, CSIDL_PROFILE, NULL, 0, dir) == S_OK) {
+			HOME = strdup(dir);
+		}
+#else
 		HOME = getpwuid(getuid())->pw_dir;
+#endif
 	}
 	if(!HOME) {
 		return false;
 	}
-	char dir[PATH_MAX];
 
 	XDG_DATA_HOME = getenv("XDG_DATA_HOME");
 	if(!XDG_DATA_HOME) {
-		snprintf(dir, PATH_MAX, "%s/%s", HOME, ".local/share");
-		XDG_DATA_HOME = strdup(dir);
+#ifdef _WIN32
+
+		if(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, dir) == S_OK) {
+			XDG_DATA_HOME = strdup(dir);
+		} else {
+#endif
+			snprintf(dir, PATH_MAX, "%s/%s", HOME, ".local/share");
+			XDG_DATA_HOME = strdup(dir);
+#ifdef _WIN32
+		}
+#endif
 	}
 
 	XDG_CONFIG_HOME = getenv("XDG_CONFIG_HOME");
 	if(!XDG_CONFIG_HOME) {
-		snprintf(dir, PATH_MAX, "%s/%s", HOME, ".config");
-		XDG_CONFIG_HOME = strdup(dir);
+#ifdef _WIN32
+
+		if(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, dir) == S_OK) {
+			XDG_DATA_HOME = strdup(dir);
+		} else {
+#endif
+			snprintf(dir, PATH_MAX, "%s/%s", HOME, ".config");
+			XDG_DATA_HOME = strdup(dir);
+#ifdef _WIN32
+		}
+#endif
 	}
 
 	XDG_CACHE_HOME = getenv("XDG_CACHE_HOME");
