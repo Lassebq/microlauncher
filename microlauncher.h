@@ -50,6 +50,8 @@ struct Instance {
 	char *version;
 	char *icon;
 	char *javaLocation;
+	GSList *extraGameArgs;
+	GSList *jvmArgs;
 };
 
 struct Settings {

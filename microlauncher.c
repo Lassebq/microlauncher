@@ -114,12 +114,39 @@ void microlauncher_save_account(json_object *obj, struct User *user) {
 	json_object_object_add(obj, "data", data);
 }
 
+static json_object *save_list(GSList *list) {
+	json_object *arr, *str;
+	size_t n = 0;
+	arr = json_object_new_array();
+	n = g_slist_length(list);
+	for(size_t i = 0; i < n; i++) {
+		str = json_object_new_string(g_slist_nth_data(list, i));
+		json_object_array_add(arr, str);
+	}
+	return arr;
+}
+
+static void load_list(json_object *arr, GSList **list) {
+	json_object *iter;
+	size_t n = 0;
+	*list = NULL;
+	if(json_object_is_type(arr, json_type_array)) {
+		n = json_object_array_length(arr);
+		for(size_t i = 0; i < n; i++) {
+			iter = json_object_array_get_idx(arr, i);
+			*list = g_slist_append(*list, g_strdup(json_object_get_string(iter)));
+		}
+	}
+}
+
 void microlauncher_load_instance(json_object *obj, struct Instance *instance) {
 	instance->name = g_strdup(json_get_string(obj, "name"));
 	instance->javaLocation = g_strdup(json_get_string(obj, "javaLocation"));
 	instance->location = g_strdup(json_get_string(obj, "location"));
 	instance->version = g_strdup(json_get_string(obj, "version"));
 	instance->icon = g_strdup(json_get_string(obj, "icon"));
+	load_list(json_object_object_get(obj, "gameArgs"), &instance->extraGameArgs);
+	load_list(json_object_object_get(obj, "jvmArgs"), &instance->jvmArgs);
 }
 
 void microlauncher_save_instance(json_object *obj, struct Instance *instance) {
@@ -128,6 +155,8 @@ void microlauncher_save_instance(json_object *obj, struct Instance *instance) {
 	json_set_string(obj, "location", instance->location);
 	json_set_string(obj, "version", instance->version);
 	json_set_string(obj, "icon", instance->icon);
+	json_object_object_add(obj, "gameArgs", save_list(instance->extraGameArgs));
+	json_object_object_add(obj, "jvmArgs", save_list(instance->jvmArgs));
 }
 
 bool microlauncher_init_config(void) {

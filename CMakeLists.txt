@@ -35,14 +35,13 @@ endforeach()
 message(STATUS ${ICON_PNGS})
 
 if(WIN32)
-    # Just in case were's cross compiling and have native executable in build environment
+    # Just in case we're cross compiling and have native executable in build environment
     find_program(ICOTOOl "icotool")
     if(NOT ICOTOOl)
         find_program(ICOTOOl "icotool.exe")
     endif()
     add_custom_command(
         OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/icon.ico"
-        BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/icon.rc"
         COMMAND ${ICOTOOl} -c ${ICON_PNGS} -o "${CMAKE_CURRENT_BINARY_DIR}/icon.ico"
         DEPENDS ${ICON_PNGS} 
     )
@@ -52,6 +51,10 @@ if(WIN32)
 endif()
 
 add_executable(microlauncher WIN32 ${SOURCES})
+if(CMAKE_COMPILER_IS_GNUCC)
+    target_compile_options(microlauncher PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type-mismatch)
+endif()
+
 target_compile_definitions(microlauncher PRIVATE
     MICROSOFT_CLIENT_ID=\"${MICROSOFT_CLIENT_ID}\"
     LAUNCHER_VERSION=\"${CMAKE_PROJECT_VERSION}\")

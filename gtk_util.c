@@ -76,12 +76,9 @@ GtkEntry *gtk_entry_digits_only(void) {
 	return entry;
 }
 
-gboolean gtk_open_file(const char *path) {
-	gboolean result = false;
+void gtk_open_file(const char *path) {
 	GFile *file = g_file_new_for_path(path);
-	gchar *file_uri = g_file_get_uri(file);
-	result = g_app_info_launch_default_for_uri(file_uri, NULL, NULL);
+	GtkFileLauncher *launcher = gtk_file_launcher_new(file);
+	gtk_file_launcher_launch(launcher, NULL, NULL, NULL, NULL);
 	g_object_unref(file);
-	g_free(file_uri);
-	return result;
 }

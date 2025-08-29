@@ -7,4 +7,4 @@ void gtk_entry_set_text(GtkEntry *entry, const char *text);
 const char *gtk_entry_get_text(GtkEntry *entry);
 GtkWindow *gtk_modal_dialog_new(GtkWindow *parent);
 GtkEntry *gtk_entry_digits_only(void);
-gboolean gtk_open_file(const char *path);
+void gtk_open_file(const char *path);

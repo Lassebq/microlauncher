@@ -317,14 +317,9 @@ void extract_zip(const char *sourcepath, const char *destpath, const char **excl
 
 char *get_escaped_command(char *const *cmdline) {
 	String str = string_new(NULL);
-	size_t i = 0;
-	size_t argstart;
-	int ch;
 	bool toquote;
 	char *const *arg = cmdline;
 	while(*arg) {
-		argstart = i;
-		const char *argchr = *arg;
 		toquote = strchr(*arg, ' ') != NULL;
 		if(toquote) {
 			string_append_char(&str, '"');
@@ -349,7 +344,6 @@ char **get_commandv(char *cmdline) {
 	char *pointer, *token_start;
 	char **heap;
 	size_t i = 0;
-	bool escapeNext = false;
 	bool quoted = false;
 	pointer = cmdline;
 	token_start = pointer;
@@ -415,11 +409,13 @@ bool util_waitpid(GPid pid, int *exitcode) {
 	HANDLE procHandle = (HANDLE)pid;
 	WaitForSingleObject(procHandle, INFINITE);
 	if(GetExitCodeProcess(procHandle, &exitCode)) {
+		CloseHandle(procHandle);
 		*exitcode = exitCode;
+		return true;
 	} else {
-		g_print("Process exited abnormally");
+		CloseHandle(procHandle);
+		return false;
 	}
-	CloseHandle(procHandle);
 #endif
 }
 
