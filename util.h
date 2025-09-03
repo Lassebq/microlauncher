@@ -39,6 +39,8 @@ void string_destroy(String *str);
 
 FILE *fopen_mkdir(const char *path, const char *mode);
 
+gboolean rmdir_recursive(const gchar *path, GError **error);
+
 char *read_file_as_string(const char *path);
 
 bool write_string_to_file(const char *str, const char *path);

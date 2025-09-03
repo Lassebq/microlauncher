@@ -921,7 +921,9 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	snprintf(versions_dir, PATH_MAX, "%s/versions", settings.launcher_root);
 	snprintf(libraries_dir, PATH_MAX, "%s/libraries", settings.launcher_root);
 	snprintf(assets_dir, PATH_MAX, "%s/assets", settings.launcher_root);
-	snprintf(natives_dir, PATH_MAX, "%s/natives", settings.launcher_root);
+	char *str = random_uuid();
+	snprintf(natives_dir, PATH_MAX, "%s/natives/%s", TEMPDIR, str);
+	free(str);
 	json_object *json = microlauncher_fetch_version(instance->version, versions_dir, libraries_dir, natives_dir, assets_dir);
 	if(!json) {
 		return false;
@@ -1006,7 +1008,7 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 			goto cleanup;
 		}
 		char *gameArgs[255 - c];
-		char *str = g_strdup(minecraftArguments);
+		str = g_strdup(minecraftArguments);
 		int argsCount = strsplit(str, ' ', gameArgs, 255 - c);
 		for(int i = 0; i < argsCount; i++) {
 			argv[c++] = malloc_strs[m++] = apply_replaces(replaces, gameArgs[i]);
@@ -1030,9 +1032,9 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	argv[c] = NULL;
 
 	ret = true;
-	for(int i = 0; i < c; i++) {
-		g_print("%s\n", argv[i]);
-	}
+	// for(int i = 0; i < c; i++) {
+	// 	g_print("%s\n", argv[i]);
+	// }
 	GPid pid = util_fork_execv(instance->location, argv);
 
 	run_callback(instance_started, pid);
@@ -1041,6 +1043,9 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 		g_print("Process exited with code %d\n", status);
 	} else {
 		g_print("Process exited abnormally\n");
+	}
+	if(!rmdir_recursive(natives_dir, NULL)) {
+		// g_print("Failed to delete natives directory");
 	}
 	if(callbacks.instance_finished) {
 		callbacks.instance_finished(callbacks.userdata);

@@ -515,8 +515,10 @@ static gboolean microlauncher_gui_enable_play(void *userdata) {
 }
 
 static void launch_instance_thread(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable) {
+	g_application_hold(G_APPLICATION(app));
 	microlauncher_launch_instance(settings->instance, settings->user);
 	g_idle_add(G_SOURCE_FUNC(microlauncher_gui_enable_play), NULL);
+	g_application_release(G_APPLICATION(app));
 }
 
 static void clicked_play(void) {
@@ -1219,7 +1221,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	window = GTK_WINDOW(gtk_window_new());
 	gtk_application_add_window(app, window);
 	gtk_window_set_default_size(window, 0, 480);
-	gtk_window_set_title(window, LAUNCHER_NAME " - Minecraft Launcher");
+	gtk_window_set_title(window, LAUNCHER_NAME " " LAUNCHER_VERSION " - Minecraft Launcher");
 
 	box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_window_set_child(window, box);

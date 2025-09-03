@@ -1,4 +1,5 @@
 #include <glib.h>
+#include <glib/gstdio.h>
 #ifdef __linux
 #include <linux/limits.h>
 #endif
@@ -80,10 +81,48 @@ void string_destroy(String *str) {
 }
 
 FILE *fopen_mkdir(const char *path, const char *mode) {
-	if(g_mkdir_with_parents(g_path_get_dirname(path), 755) != 0) {
+	if(g_mkdir_with_parents(g_path_get_dirname(path), 0755) != 0) {
 		return NULL;
 	}
 	return fopen(path, mode);
+}
+
+gboolean rmdir_recursive(const gchar *path, GError **error) {
+	GDir *dir = g_dir_open(path, 0, error);
+	if(!dir) {
+		return FALSE;
+	}
+
+	const gchar *entry;
+	gboolean ok = TRUE;
+	while((entry = g_dir_read_name(dir))) {
+		gchar *full_path = g_build_filename(path, entry, NULL);
+
+		if(g_file_test(full_path, G_FILE_TEST_IS_DIR)) {
+			if(!rmdir_recursive(full_path, error)) {
+				ok = FALSE;
+			}
+		} else {
+			if(g_remove(full_path) != 0) {
+				g_set_error(error, G_FILE_ERROR, g_file_error_from_errno(errno),
+							"Failed to remove file: %s", full_path);
+				ok = FALSE;
+			}
+		}
+		g_free(full_path);
+		if(!ok) {
+			break;
+		}
+	}
+	g_dir_close(dir);
+
+	if(g_rmdir(path) != 0) {
+		g_set_error(error, G_FILE_ERROR, g_file_error_from_errno(errno),
+					"Failed to remove directory: %s", path);
+		ok = FALSE;
+	}
+
+	return ok;
 }
 
 char *read_file_as_string(const char *path) {
@@ -241,16 +280,16 @@ const char *util_basename(const char *path) {
 }
 
 char *random_uuid(void) {
-	char *str = malloc(39);
+	char *str = malloc(37);
 	uuid_t uuid;
 #ifdef _WIN32
 	OLECHAR widestr[39];
 	CoCreateGuid(&uuid);
 	StringFromGUID2(&uuid, widestr, 39); // "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}"
-	wcstombs(str, widestr, 39);
 	/* Remove surrounding brackets */
-	str[37] = '\0';
-	return str + 1;
+	wcstombs(str, widestr + 1, 36);
+	str[36] = '\0';
+	return str;
 #else
 	uuid_generate_random(uuid);
 	uuid_unparse_lower(uuid, str);

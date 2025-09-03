@@ -3,6 +3,7 @@
 #include "stdbool.h"
 
 extern char *HOME;
+extern char *TEMPDIR;
 extern char *XDG_DATA_HOME;
 extern char *XDG_CONFIG_HOME;
 extern char *XDG_CACHE_HOME;

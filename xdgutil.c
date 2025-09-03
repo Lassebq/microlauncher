@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 char *HOME;
+char *TEMPDIR;
 char *XDG_DATA_HOME;
 char *XDG_CONFIG_HOME;
 char *XDG_CACHE_HOME;
@@ -34,6 +35,15 @@ bool xdgutil_init(void) {
 	if(!HOME) {
 		return false;
 	}
+#ifdef _WIN32
+	if(!GetTempPathA(PATH_MAX, dir)) {
+		return false;
+	}
+	dir[strlen(dir) - 1] = '\0'; // Remove last backslash
+	TEMPDIR = strdup(dir);
+#else
+	TEMPDIR = "/tmp";
+#endif
 
 	XDG_DATA_HOME = getenv("XDG_DATA_HOME");
 	if(!XDG_DATA_HOME) {

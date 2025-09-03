@@ -6,3 +6,8 @@ Icon=io.github.lassebq.microlauncher
 Terminal=false
 Type=Application
 Categories=Game;
+Actions=new-window;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=microlauncher
