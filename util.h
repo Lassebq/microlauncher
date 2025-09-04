@@ -13,6 +13,26 @@
 #define OS_NAME "windows"
 #endif
 
+#if defined(__amd64__) || defined(__amd64) || defined(_M_X64)
+#define OS_ARCH "amd64"
+#elif defined(__i386__) || defined(__i386) || defined(_M_IX86) || defined(_M_X86)
+#ifdef _WIN32
+#define OS_ARCH "x86"
+#else
+#define OS_ARCH "i386"
+#endif
+#elif defined(__arm__) || defined(_M_ARM)
+#define OS_ARCH "arm"
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#define OS_ARCH "aarch64"
+#elif defined(__powerpc) || defined(__powerpc__) || defined(__powerpc64__) || defined(__POWERPC__) || defined(__ppc__) || defined(__PPC__) || defined(_ARCH_PPC)
+#define OS_ARCH "ppc"
+#elif defined(__PPC64__) || defined(__ppc64__) || defined(_ARCH_PPC64)
+#define OS_ARCH "ppc64"
+#else
+#define OS_ARCH "unknown";
+#endif
+
 typedef char Sha1[SHA_DIGEST_LENGTH * 2 + 1];
 typedef char Sha256[SHA256_DIGEST_LENGTH * 2 + 1];
 

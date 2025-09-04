@@ -7,6 +7,8 @@
 
 int32_t json_get_int(json_object *obj, const char *key);
 
+int64_t json_get_int64(json_object *obj, const char *key);
+
 const char *json_get_string(json_object *obj, const char *key);
 
 bool json_get_bool(json_object *obj, const char *key);

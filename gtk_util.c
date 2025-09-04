@@ -22,14 +22,14 @@ void gtk_widget_set_margin(GtkWidget *widget, int top, int bottom, int left, int
 
 void gtk_entry_set_text(GtkEntry *entry, const char *text) {
 	if(!text) {
-		gtk_entry_buffer_set_text(gtk_entry_get_buffer(entry), "", 0);
+		gtk_editable_set_text(GTK_EDITABLE(entry), "");
 		return;
 	}
-	gtk_entry_buffer_set_text(gtk_entry_get_buffer(entry), text, strlen(text));
+	gtk_editable_set_text(GTK_EDITABLE(entry), text);
 }
 
 const char *gtk_entry_get_text(GtkEntry *entry) {
-	return gtk_entry_buffer_get_text(gtk_entry_get_buffer(entry));
+	return gtk_editable_get_text(GTK_EDITABLE(entry));
 }
 
 GtkWindow *gtk_modal_dialog_new(GtkWindow *parent) {

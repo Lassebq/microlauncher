@@ -15,6 +15,8 @@ struct MinecraftProfile {
 };
 
 struct MicrosoftUser {
+	time_t oauth_valid_until;
+	time_t valid_until;
 	char *access_token;
 	char *refresh_token;
 	char *xbl_token;
@@ -32,10 +34,10 @@ struct DeviceCodeOAuthResponse {
 };
 
 bool microlauncher_msa_xboxlive_auth(struct MicrosoftUser *user);
-bool microlauncher_msa_xboxlive_xsts(struct MicrosoftUser *user);
+bool microlauncher_msa_xboxlive_xsts(struct MicrosoftUser *user, char **error_message);
 struct DeviceCodeOAuthResponse microlauncher_msa_get_device_code(void);
 int microlauncher_msa_device_token(const char *device_code, struct MicrosoftUser *user);
 int microlauncher_msa_refresh_token(const char *refresh_token, struct MicrosoftUser *user);
 void microlauncher_msa_destroy_device_code(struct DeviceCodeOAuthResponse *response);
-char *microlauncher_msa_login(struct MicrosoftUser *user);
+bool microlauncher_msa_login(struct MicrosoftUser *user, char **error_message);
 struct MinecraftProfile microlauncher_msa_get_profile(const char *accessToken);

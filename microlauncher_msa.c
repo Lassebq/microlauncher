@@ -1,5 +1,6 @@
 #include "microlauncher_msa.h"
 #include "glib.h"
+#include "glib/gprintf.h"
 #include "json.h"
 #include "json_object.h"
 #include "json_types.h"
@@ -9,6 +10,11 @@
 #include <stdlib.h>
 
 bool microlauncher_msa_xboxlive_auth(struct MicrosoftUser *user) {
+	time_t tm;
+	time(&tm);
+	if(tm < user->valid_until - 5) {
+		return true;
+	}
 	json_object *post = json_object_new_object();
 	json_object *Properties = json_object_new_object();
 	json_set_string(Properties, "AuthMethod", "RPS");
@@ -48,7 +54,12 @@ bool microlauncher_msa_xboxlive_auth(struct MicrosoftUser *user) {
 	return true;
 }
 
-bool microlauncher_msa_xboxlive_xsts(struct MicrosoftUser *user) {
+bool microlauncher_msa_xboxlive_xsts(struct MicrosoftUser *user, char **error_message) {
+	time_t tm;
+	time(&tm);
+	if(tm < user->valid_until - 5) {
+		return true;
+	}
 	json_object *post = json_object_new_object();
 	json_object *Properties = json_object_new_object();
 	json_object *arr = json_object_new_array();
@@ -63,9 +74,37 @@ bool microlauncher_msa_xboxlive_xsts(struct MicrosoftUser *user) {
 	headers = curl_slist_append(headers, "Content-Type: application/json");
 	headers = curl_slist_append(headers, "Accept: application/json");
 	json_object *response = microlauncher_http_get_json(URL_XBL_XSTS, headers, str);
+	if(!response) {
+		return false;
+	}
 	json_object_put(post);
 	str = json_get_string(response, "Token");
 	if(!str) {
+		const char *msg = NULL;
+		int64_t xerr = json_get_int64(response, "XErr");
+		switch(xerr) {
+			case 2148916233:
+				msg = "You don't have an Xbox account!";
+				break;
+			case 2148916235:
+				msg = "Xbox Live is banned in your country!";
+				break;
+			case 2148916236:
+			case 2148916237:
+				msg = "Your account needs adult verification (South Korea)";
+				break;
+			case 2148916238:
+				msg = "The account is a child and cannot proceed unless the account is added to a Family by an adult.";
+				break;
+			default:
+				msg = json_get_string(response, "Message");
+				if(!msg) {
+					msg = "Unknown";
+				}
+				break;
+		}
+
+		*error_message = g_strdup_printf("Xbox Error %ld: %s", xerr, msg);
 		return false;
 	}
 	user->xsts_token = g_strdup(str);
@@ -73,10 +112,12 @@ bool microlauncher_msa_xboxlive_xsts(struct MicrosoftUser *user) {
 	return true;
 }
 
-/**
- * Returns accessToken
- */
-char *microlauncher_msa_login(struct MicrosoftUser *user) {
+bool microlauncher_msa_login(struct MicrosoftUser *user, char **error_message) {
+	time_t tm;
+	time(&tm);
+	if(tm < user->valid_until - 5) {
+		return true;
+	}
 	json_object *post = json_object_new_object();
 	char *str = g_strdup_printf("XBL3.0 x=%s;%s", user->uhs, user->xsts_token);
 	json_set_string(post, "identityToken", str);
@@ -87,9 +128,20 @@ char *microlauncher_msa_login(struct MicrosoftUser *user) {
 	headers = curl_slist_append(headers, "Accept: application/json");
 	json_object *response = microlauncher_http_get_json(URL_MCAPI_XBOXLOGIN, headers, postStr);
 	json_object_put(post);
+	if(!response) {
+		return false;
+	}
 	char *accessToken = g_strdup(json_get_string(response, "access_token"));
+	if(!accessToken) {
+		*error_message = g_strdup(json_get_string(response, "error"));
+		json_object_put(response);
+		return false;
+	}
+	user->mc_access_token = accessToken;
+	time(&tm);
+	user->valid_until = tm + json_get_int(response, "expires_in");
 	json_object_put(response);
-	return accessToken;
+	return true;
 }
 
 struct MinecraftProfile microlauncher_msa_get_profile(const char *accessToken) {
@@ -98,10 +150,10 @@ struct MinecraftProfile microlauncher_msa_get_profile(const char *accessToken) {
 	char *str = g_strdup_printf("Authorization: Bearer %s", accessToken);
 	headers = curl_slist_append(headers, str);
 	json_object *response = microlauncher_http_get_json(URL_MCAPI_PROFILE, headers, NULL);
+	free(str);
 	profile.username = g_strdup(json_get_string(response, "name"));
 	profile.uuid = g_strdup(json_get_string(response, "id"));
 	json_object_put(response);
-	free(str);
 	return profile;
 }
 
@@ -112,6 +164,14 @@ struct MinecraftProfile microlauncher_msa_get_profile(const char *accessToken) {
  * -1 - cancel/other error
  */
 int microlauncher_msa_check_token(const char *postcontent, struct MicrosoftUser *user) {
+	time_t tm;
+	time(&tm);
+	if(tm < user->valid_until - 5) {
+		return 0;
+	}
+	if(tm < user->oauth_valid_until - 5) {
+		return 0;
+	}
 	struct curl_slist *headers = NULL;
 	headers = curl_slist_append(headers, "Content-Type: application/x-www-form-urlencoded");
 	headers = curl_slist_append(headers, "Accept: application/json");
@@ -125,6 +185,9 @@ int microlauncher_msa_check_token(const char *postcontent, struct MicrosoftUser 
 		if(strequal(json_get_string(obj, "token_type"), "Bearer")) {
 			user->access_token = g_strdup(json_get_string(obj, "access_token"));
 			user->refresh_token = g_strdup(json_get_string(obj, "refresh_token"));
+
+			time(&tm);
+			user->oauth_valid_until = tm + json_get_int(obj, "expires_in");
 			return 0;
 		}
 	}

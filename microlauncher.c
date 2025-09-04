@@ -84,10 +84,12 @@ void microlauncher_load_account(json_object *obj, struct User *user) {
 	json_object *data = json_object_object_get(obj, "data");
 	switch(user->type) {
 		case ACCOUNT_TYPE_MSA:
-			user->data = malloc(sizeof(struct MicrosoftUser));
+			user->data = g_new0(struct MicrosoftUser, 1);
 			struct MicrosoftUser *userdata = user->data;
 			userdata->access_token = g_strdup(json_get_string(data, "access_token"));
 			userdata->refresh_token = g_strdup(json_get_string(data, "refresh_token"));
+			userdata->mc_access_token = g_strdup(json_get_string(data, "minecraft_access_token"));
+			userdata->valid_until = json_get_int(data, "valid_until");
 			break;
 		case ACCOUNT_TYPE_OFFLINE:
 			user->data = NULL;
@@ -109,6 +111,8 @@ void microlauncher_save_account(json_object *obj, struct User *user) {
 			userdata = (struct MicrosoftUser *)user->data;
 			json_set_string(data, "access_token", userdata->access_token);
 			json_set_string(data, "refresh_token", userdata->refresh_token);
+			json_set_string(data, "minecraft_access_token", userdata->mc_access_token);
+			json_set_int(data, "valid_until", userdata->valid_until);
 			break;
 	}
 	json_object_object_add(obj, "data", data);
@@ -390,9 +394,9 @@ char *microlauncher_get_library_path(const char *name, const char *classifier, c
 	return NULL;
 }
 
-void microlauncher_fetch_artifact(const char *url, const char *path, const char *label, const char *sha1, int size, int total_size, int *download_size) {
+bool microlauncher_fetch_artifact(const char *url, const char *path, const char *label, const char *sha1, int size, int total_size, int *download_size) {
 	if(!path) {
-		return;
+		return false;
 	}
 	if(download_size) {
 		*download_size += size;
@@ -419,18 +423,20 @@ void microlauncher_fetch_artifact(const char *url, const char *path, const char 
 	if(sha1 && strcmp(hash, sha1) != 0) {
 		goto redownload;
 	}
-	return; /* everything is fine and we can keep local lib */
+	return true; /* everything is fine and we can keep local lib */
 
 redownload:
 	if(url) {
 		/* Sharing curl handle has better performance, but doesn't work in multithreaded scenario */
 		if(!microlauncher_http_get_with_handle(globalCurlHandle, url, path)) {
 			g_print("CURL error on %s\n", url);
+			return false;
 		}
 	}
+	return true;
 }
 
-void microlauncher_fetch_library(json_object *libObj, const char *libraries_path, const char *natives_path, int total_size, int *download_size) {
+bool microlauncher_fetch_library(json_object *libObj, const char *libraries_path, const char *natives_path, int total_size, int *download_size, char *failedUrl) {
 	json_object *downloads = json_object_object_get(libObj, "downloads");
 	json_object *artifact = json_object_object_get(downloads, "artifact");
 	json_object *classifiers = json_object_object_get(downloads, "classifiers");
@@ -454,18 +460,21 @@ void microlauncher_fetch_library(json_object *libObj, const char *libraries_path
 		url = url2;
 	}
 
-	microlauncher_fetch_artifact(
-		url,
-		realpath,
-		NULL,
-		json_get_string(artifact, "sha1"),
-		json_get_int(artifact, "size"),
-		total_size, download_size);
+	if(!microlauncher_fetch_artifact(
+		   url,
+		   realpath,
+		   NULL,
+		   json_get_string(artifact, "sha1"),
+		   json_get_int(artifact, "size"),
+		   total_size, download_size)) {
+		snprintf(failedUrl, PATH_MAX, "%s", url);
+		return false;
+	}
 
 	if(classifier) {
 		obj = json_object_object_get(classifiers, classifier);
 		if(!obj) {
-			return;
+			return true;
 		}
 		path = json_get_string(obj, "path");
 		url = json_get_string(obj, "url");
@@ -477,13 +486,16 @@ void microlauncher_fetch_library(json_object *libObj, const char *libraries_path
 			snprintf(url2, PATH_MAX, "%s/%s", url_base, path);
 			url = url2;
 		}
-		microlauncher_fetch_artifact(
-			url,
-			realpath,
-			NULL,
-			json_get_string(artifact, "sha1"),
-			json_get_int(artifact, "size"),
-			total_size, download_size);
+		if(!microlauncher_fetch_artifact(
+			   url,
+			   realpath,
+			   NULL,
+			   json_get_string(artifact, "sha1"),
+			   json_get_int(artifact, "size"),
+			   total_size, download_size)) {
+			snprintf(failedUrl, PATH_MAX, "%s", url);
+			return false;
+		}
 
 		obj = json_object_object_get(libObj, "extract");
 		obj = json_object_object_get(obj, "exclude");
@@ -498,6 +510,7 @@ void microlauncher_fetch_library(json_object *libObj, const char *libraries_path
 			extract_zip(realpath, natives_path, exclusions);
 		}
 	}
+	return true;
 }
 
 json_object *inherit_json(const char *versions_path, const char *id) {
@@ -555,6 +568,7 @@ static enum RuleAction get_action(const char *str) {
 
 static bool check_rules(json_object *rules, GSList *featuresList) {
 	json_object *iter, *os, *features;
+	const char *str;
 	enum RuleAction action, appliedAction;
 	if(!json_object_is_type(rules, json_type_array)) {
 		return true;
@@ -566,11 +580,18 @@ static bool check_rules(json_object *rules, GSList *featuresList) {
 		action = get_action(json_get_string(iter, "action"));
 		os = json_object_object_get(iter, "os");
 		if(json_object_is_type(os, json_type_object)) {
-			if(!strequal(json_get_string(os, "name"), OS_NAME)) {
+			str = json_get_string(os, "name");
+			if(str && !strequal(str, OS_NAME)) {
 				continue;
 			}
+			str = json_get_string(os, "arch");
+			if(str && !strequal(str, OS_ARCH)) {
+				continue;
+			}
+			// TODO Not so necessary to implement with BetterJSONs
 			// int matchlength;
-			// if(re_match(json_get_string(os, "version"), /* FIXME */ osVersion, &matchlength) == -1) {
+			// str = json_get_string(os, "version")
+			// if(re_match(str, osVersion, &matchlength) == -1) {
 			// 	continue;
 			// }
 		}
@@ -598,7 +619,7 @@ static bool check_rules(json_object *rules, GSList *featuresList) {
 	return appliedAction == RULE_ACTION_ALLOW;
 }
 
-json_object *microlauncher_fetch_version(const char *versionId, const char *versions_path, const char *libraries_path, const char *natives_path, const char *assets_dir) {
+json_object *microlauncher_fetch_version(const char *versionId, const char *versions_path, const char *libraries_path, const char *natives_path, const char *assets_dir, GCancellable *cancellable, char *failedUrl) {
 	json_object *json, *libraries, *downloads, *artifact, *client, *iter, *assets_json, *obj;
 	char path[PATH_MAX];
 	char url[PATH_MAX];
@@ -607,11 +628,11 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 	if(!json) {
 		return NULL;
 	}
-	const char *id = json_get_string(json, "id");
+	const char *str = json_get_string(json, "id");
 	libraries = json_object_object_get(json, "libraries");
 	downloads = json_object_object_get(json, "downloads");
 	client = json_object_object_get(downloads, "client");
-	snprintf(path, PATH_MAX, "%s/%s/%s.jar", versions_path, id, id);
+	snprintf(path, PATH_MAX, "%s/%s/%s.jar", versions_path, str, str);
 	// Count total size
 	int total_size = json_get_int(client, "size");
 	int current_size = 0;
@@ -641,15 +662,22 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 	}
 	// Perform download
 	run_callback(stage_update, "Downloading libraries");
-	snprintf(path, PATH_MAX, "%s/%s/%s.jar", versions_path, id, id);
+	snprintf(path, PATH_MAX, "%s/%s/%s.jar", versions_path, str, str);
 
-	microlauncher_fetch_artifact(
-		json_get_string(client, "url"),
-		path,
-		NULL,
-		json_get_string(client, "sha1"),
-		json_get_int(client, "size"),
-		total_size, &current_size);
+	str = json_get_string(client, "url");
+	if(!microlauncher_fetch_artifact(
+		   str,
+		   path,
+		   NULL,
+		   json_get_string(client, "sha1"),
+		   json_get_int(client, "size"),
+		   total_size, &current_size)) {
+		snprintf(failedUrl, PATH_MAX, "%s", str);
+		goto cancel;
+	}
+	if(cancellable && g_cancellable_is_cancelled(cancellable)) {
+		goto cancel;
+	}
 
 	if(json_object_is_type(libraries, json_type_array)) {
 		size_t length = json_object_array_length(libraries);
@@ -657,7 +685,12 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 		for(size_t i = 0; i < length; i++) {
 			iter = json_object_array_get_idx(libraries, i);
 			if(check_rules(json_object_object_get(iter, "rules"), NULL)) {
-				microlauncher_fetch_library(iter, libraries_path, natives_path, total_size, &current_size);
+				if(!microlauncher_fetch_library(iter, libraries_path, natives_path, total_size, &current_size, failedUrl)) {
+					goto cancel;
+				}
+			}
+			if(cancellable && g_cancellable_is_cancelled(cancellable)) {
+				goto cancel;
 			}
 		}
 	}
@@ -674,13 +707,23 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 			const char *hash = json_get_string(val, "hash");
 			snprintf(path, PATH_MAX, "%s/objects/%c%c/%s", assets_dir, *hash, *(hash + 1), hash);
 			snprintf(url, PATH_MAX, "https://resources.download.minecraft.net/%c%c/%s", *hash, *(hash + 1), hash);
-			microlauncher_fetch_artifact(url, path, key, hash, json_get_int(val, "size"), total_size, &current_size);
+			if(!microlauncher_fetch_artifact(url, path, key, hash, json_get_int(val, "size"), total_size, &current_size)) {
+				snprintf(failedUrl, PATH_MAX, "%s", url);
+				goto cancel;
+			}
+			if(cancellable && g_cancellable_is_cancelled(cancellable)) {
+				goto cancel;
+			}
 		}
 	}
 
 	// Finished
 	run_callback(stage_update, NULL);
 	return json;
+cancel:
+	json_object_put(json);
+	run_callback(stage_update, NULL);
+	return NULL;
 }
 
 char *microlauncher_get_javacp(json_object *json, const char *versions_path, const char *libraries_path) {
@@ -811,11 +854,12 @@ void microlauncher_save_settings(void) {
 	json_object_put(obj);
 }
 
-bool microlauncher_auth_user(struct User *user) {
-	bool b = true;
+bool microlauncher_auth_user(struct User *user, GCancellable *cancellable) {
 	run_callback(stage_update, "Authentication");
 	int steps, i;
 	i = 1;
+	const char *errorMessage;
+	char *tmpError = NULL;
 	switch(user->type) {
 		case ACCOUNT_TYPE_OFFLINE:
 			user->accessToken = "-";
@@ -824,40 +868,46 @@ bool microlauncher_auth_user(struct User *user) {
 		case ACCOUNT_TYPE_MSA:
 			steps = 5;
 			struct MicrosoftUser *msuser = user->data;
-			run_callback(progress_update, (double)i++ / steps, "Checking refresh token");
-			if(microlauncher_msa_refresh_token(msuser->refresh_token, msuser) != 0) {
-				b = false;
-				break;
+			run_callback(progress_update, (double)i++ / steps, "Checking access token");
+			if(microlauncher_msa_refresh_token(msuser->refresh_token, msuser) != 0 || (cancellable && g_cancellable_is_cancelled(cancellable))) {
+				errorMessage = "Failed check access token";
+				goto cancel;
 			}
 			run_callback(progress_update, (double)i++ / steps, "Authenticating via Xbox");
-			if(!microlauncher_msa_xboxlive_auth(msuser)) {
-				b = false;
-				break;
+			if(!microlauncher_msa_xboxlive_auth(msuser) || (cancellable && g_cancellable_is_cancelled(cancellable))) {
+				errorMessage = "Could not authenticate with Xbox Live";
+				goto cancel;
 			}
 			run_callback(progress_update, (double)i++ / steps, "Obtaining XSTS token");
-			if(!microlauncher_msa_xboxlive_xsts(msuser)) {
-				b = false;
-				break;
+			if(!microlauncher_msa_xboxlive_xsts(msuser, &tmpError) || (cancellable && g_cancellable_is_cancelled(cancellable))) {
+				errorMessage = tmpError;
+				goto cancel;
 			}
 			run_callback(progress_update, (double)i++ / steps, "Getting access token");
-			char *accessToken;
-			if(!(accessToken = microlauncher_msa_login(msuser))) {
-				b = false;
-				break;
+			if(!microlauncher_msa_login(msuser, &tmpError) || (cancellable && g_cancellable_is_cancelled(cancellable))) {
+				errorMessage = tmpError ? tmpError : "Failed to get access token";
+				goto cancel;
 			}
 			run_callback(progress_update, (double)i++ / steps, "Getting profile");
-			struct MinecraftProfile profile = microlauncher_msa_get_profile(accessToken);
-			if(!profile.username) {
-				b = false;
-				break;
+			struct MinecraftProfile profile = microlauncher_msa_get_profile(msuser->mc_access_token);
+			if(!profile.username || (cancellable && g_cancellable_is_cancelled(cancellable))) {
+				errorMessage = "Could not get Minecraft profile";
+				goto cancel;
 			}
 			user->name = profile.username;
 			user->uuid = profile.uuid;
-			user->accessToken = accessToken;
+			user->accessToken = msuser->mc_access_token;
 			break;
 	}
 	run_callback(stage_update, NULL);
-	return b;
+	return true;
+cancel:
+	run_callback(stage_update, NULL);
+	if(!g_cancellable_is_cancelled(cancellable)) {
+		run_callback(show_error, errorMessage);
+	}
+	free(tmpError);
+	return false;
 }
 
 static char *apply_replaces(const char *const *replaces, const char *str) {
@@ -905,7 +955,7 @@ static int add_arguments(json_object *array, const char *const *replaces, GSList
 	return j;
 }
 
-bool microlauncher_launch_instance(const struct Instance *instance, struct User *user) {
+bool microlauncher_launch_instance(const struct Instance *instance, struct User *user, GCancellable *cancellable) {
 	if(!instance || !user) {
 		return false;
 	}
@@ -918,17 +968,27 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	char assets_dir[PATH_MAX];
 	char natives_dir[PATH_MAX];
 	const char *main_class;
+	memset(path, 0, PATH_MAX);
 	snprintf(versions_dir, PATH_MAX, "%s/versions", settings.launcher_root);
 	snprintf(libraries_dir, PATH_MAX, "%s/libraries", settings.launcher_root);
 	snprintf(assets_dir, PATH_MAX, "%s/assets", settings.launcher_root);
 	char *str = random_uuid();
 	snprintf(natives_dir, PATH_MAX, "%s/natives/%s", TEMPDIR, str);
 	free(str);
-	json_object *json = microlauncher_fetch_version(instance->version, versions_dir, libraries_dir, natives_dir, assets_dir);
-	if(!json) {
+	json_object *json = microlauncher_fetch_version(instance->version, versions_dir, libraries_dir, natives_dir, assets_dir, cancellable, path);
+	if(path[0]) {
+		char *format = g_strdup_printf("Failed to fetch resource: %s", path);
+		run_callback(show_error, format);
+		free(format);
 		return false;
 	}
-	if(!microlauncher_auth_user(user)) {
+	if(!json) {
+		if(!g_cancellable_is_cancelled(cancellable)) {
+			run_callback(show_error, "Failed to get version JSON");
+		}
+		return false;
+	}
+	if(!microlauncher_auth_user(user, cancellable)) {
 		return false;
 	}
 	const char *id = json_get_string(json, "id");
@@ -975,6 +1035,9 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	features = g_slist_append(features, g_strdup("has_custom_resolution"));
 	if(settings.demo) {
 		features = g_slist_append(features, g_strdup("is_demo_user"));
+	}
+	if(settings.fullscreen) {
+		features = g_slist_append(features, g_strdup("has_fullscreen"));
 	}
 	int c = 0;
 	main_class = json_get_string(json, "mainClass");
@@ -1032,9 +1095,9 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	argv[c] = NULL;
 
 	ret = true;
-	// for(int i = 0; i < c; i++) {
-	// 	g_print("%s\n", argv[i]);
-	// }
+	for(int i = 0; i < c; i++) {
+		g_print("%s\n", argv[i]);
+	}
 	GPid pid = util_fork_execv(instance->location, argv);
 
 	run_callback(instance_started, pid);
@@ -1042,10 +1105,10 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	if(util_waitpid(pid, &status)) {
 		g_print("Process exited with code %d\n", status);
 	} else {
-		g_print("Process exited abnormally\n");
+		g_print("Process stopped with error\n");
 	}
 	if(!rmdir_recursive(natives_dir, NULL)) {
-		// g_print("Failed to delete natives directory");
+		run_callback(show_error, "Failed to delete natives directory");
 	}
 	if(callbacks.instance_finished) {
 		callbacks.instance_finished(callbacks.userdata);
@@ -1081,7 +1144,7 @@ int main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 
-	if(microlauncher_launch_instance(active_instance, active_user)) {
+	if(microlauncher_launch_instance(active_instance, active_user, NULL)) {
 		return EXIT_SUCCESS;
 	}
 

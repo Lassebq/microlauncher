@@ -13,6 +13,8 @@
 #include <curl/curl.h>
 #include <glib.h>
 #include <gtk/gtk.h>
+#include <stdatomic.h>
+#include <threads.h>
 #ifdef __linux
 #include <linux/limits.h>
 #elif _WIN32
@@ -48,6 +50,7 @@ static GtkWidget *accountsPage;
 static GtkStringList *accountsList;
 static GtkWidget *instancesPage;
 static GtkStringList *instancesList;
+static GtkListView *instancesView;
 
 static GtkLabel *msaCodeLabel;
 static GtkLabel *msaHint;
@@ -56,6 +59,7 @@ static GtkSpinner *msaSpinner;
 static int msaSecondsLeft;
 
 static GPid instancePid = 0;
+static GCancellable *instanceCancellable;
 
 static struct Settings *settings;
 
@@ -207,6 +211,9 @@ static void create_or_modify_instance(GtkButton *button, void *userdata) {
 	add_instance(inst);
 	if(wasActiveInstance) {
 		settings->instance = inst;
+		GtkSingleSelection *selection = GTK_SINGLE_SELECTION(gtk_list_view_get_model(instancesView));
+		guint index = gtk_string_list_find(instancesList, inst->name);
+		gtk_single_selection_set_selected(selection, index);
 	}
 	microlauncher_gui_refresh_instance();
 	gtk_window_destroy(createInstance->dialog);
@@ -223,6 +230,29 @@ static gboolean try_scroll_to(struct TryScroll *tryScroll) {
 	gtk_scroll_info_set_enable_vertical(scrollInfo, true);
 	gtk_column_view_scroll_to(tryScroll->colView, tryScroll->row, NULL, GTK_LIST_SCROLL_SELECT | GTK_LIST_SCROLL_FOCUS, scrollInfo);
 	return false;
+}
+
+struct ModifyInstanceName {
+	char *instanceName;
+	GtkWidget *createButton;
+};
+
+void instance_name_changed(GtkEntry *self, gpointer user_data) {
+	struct ModifyInstanceName instName = *(struct ModifyInstanceName *)user_data;
+	const char *text = gtk_entry_get_text(self);
+	if(strlen(text) == 0) {
+		gtk_widget_add_css_class(GTK_WIDGET(self), "error");
+		gtk_widget_set_tooltip_text(GTK_WIDGET(self), "Name cannot be empty");
+		gtk_widget_set_sensitive(instName.createButton, false);
+	} else if(gtk_string_list_find(instancesList, text) != G_MAXUINT && !strequal(instName.instanceName, text)) {
+		gtk_widget_add_css_class(GTK_WIDGET(self), "error");
+		gtk_widget_set_tooltip_text(GTK_WIDGET(self), "Instance name conflicts with existing instance");
+		gtk_widget_set_sensitive(instName.createButton, false);
+	} else {
+		gtk_widget_remove_css_class(GTK_WIDGET(self), "error");
+		gtk_widget_set_tooltip_text(GTK_WIDGET(self), "");
+		gtk_widget_set_sensitive(instName.createButton, true);
+	}
 }
 
 static void microlauncher_modify_instance_window(GtkButton *button, struct Instance *instance) {
@@ -271,6 +301,9 @@ static void microlauncher_modify_instance_window(GtkButton *button, struct Insta
 	if(instance) {
 		gtk_entry_set_text(GTK_ENTRY(widget), instance->name);
 	}
+	struct ModifyInstanceName *instName = g_new(struct ModifyInstanceName, 1);
+	instName->instanceName = instance ? instance->name : NULL;
+	g_signal_connect_data(widget, "changed", G_CALLBACK(instance_name_changed), instName, (GClosureNotify)g_free, 0);
 	gtk_grid_attach(grid, widget, 2, 0, 1, 1);
 	createInstance->instanceName = GTK_ENTRY(widget);
 
@@ -368,6 +401,8 @@ static void microlauncher_modify_instance_window(GtkButton *button, struct Insta
 	g_signal_connect(widget, "clicked", G_CALLBACK(cancel_callback), newWindow);
 	gtk_box_append(container, widget);
 	widget = gtk_button_new_with_label(instance ? "Modify instance" : "Create instance");
+	gtk_widget_set_sensitive(widget, instance != NULL);
+	instName->createButton = widget;
 	gtk_widget_set_hexpand(widget, true);
 	g_signal_connect_data(widget, "clicked", G_CALLBACK(create_or_modify_instance), createInstance, (GClosureNotify)g_free, 0);
 	gtk_box_append(container, widget);
@@ -505,8 +540,18 @@ static void microlauncher_gui_refresh_instance(void) {
 	gtk_widget_set_sensitive(GTK_WIDGET(playButton), settings->instance && settings->user);
 }
 
+static gboolean microlauncher_gui_enable_cancel(void *userdata) {
+	gtk_button_set_label(playButton, "Cancel");
+	gtk_widget_set_sensitive(GTK_WIDGET(playButton), true);
+	return false;
+}
+
 static gboolean microlauncher_gui_enable_play(void *userdata) {
 	instancePid = 0;
+	if(instanceCancellable) {
+		g_object_unref(instanceCancellable);
+		instanceCancellable = NULL;
+	}
 	gtk_button_set_label(playButton, "Play");
 	gtk_widget_set_sensitive(GTK_WIDGET(playButton), true);
 	gtk_widget_set_sensitive(GTK_WIDGET(instancesPage), true);
@@ -514,16 +559,23 @@ static gboolean microlauncher_gui_enable_play(void *userdata) {
 	return false;
 }
 
-static void launch_instance_thread(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable) {
+static void launch_instance_thread(GTask *gtask, gpointer source_object, gpointer task_data, GCancellable *cancellable) {
 	g_application_hold(G_APPLICATION(app));
-	microlauncher_launch_instance(settings->instance, settings->user);
-	g_idle_add(G_SOURCE_FUNC(microlauncher_gui_enable_play), NULL);
+	g_idle_add(microlauncher_gui_enable_cancel, NULL);
+	microlauncher_launch_instance(settings->instance, settings->user, cancellable);
+	g_idle_add(microlauncher_gui_enable_play, NULL);
 	g_application_release(G_APPLICATION(app));
 }
 
 static void clicked_play(void) {
 	if(instancePid != 0) {
 		util_kill_process(instancePid);
+		return;
+	}
+	if(instanceCancellable) {
+		g_cancellable_cancel(instanceCancellable);
+		g_object_unref(instanceCancellable);
+		instanceCancellable = NULL;
 		return;
 	}
 	gtk_widget_set_sensitive(GTK_WIDGET(playButton), false);
@@ -533,7 +585,8 @@ static void clicked_play(void) {
 	settings->height = atoi(gtk_entry_buffer_get_text(gtk_entry_get_buffer(heightEntry)));
 	settings->fullscreen = gtk_check_button_get_active(checkFullscreen);
 	settings->demo = gtk_check_button_get_active(checkDemo);
-	GTask *task = g_task_new(playButton, NULL, NULL, NULL);
+	instanceCancellable = g_cancellable_new();
+	GTask *task = g_task_new(playButton, instanceCancellable, NULL, NULL);
 	g_task_run_in_thread(task, launch_instance_thread);
 }
 
@@ -770,6 +823,7 @@ static GtkWidget *microlauncher_gui_page_instances(void) {
 	g_signal_connect(factory, "bind", G_CALLBACK(instance_list_view_bind_factory), NULL);
 
 	widget = gtk_list_view_new(GTK_SELECTION_MODEL(selection), factory);
+	instancesView = GTK_LIST_VIEW(widget);
 	if(settings->instance) {
 		gtk_single_selection_set_selected(selection, gtk_string_list_find(instancesList, settings->instance->name));
 	}
@@ -893,7 +947,7 @@ static void check_device_code(GTask *task, gpointer source_object, gpointer task
 	if(!response || !response->device_code) {
 		return;
 	}
-	struct MicrosoftUser *userdata = malloc(sizeof(struct MicrosoftUser));
+	struct MicrosoftUser *userdata = g_new0(struct MicrosoftUser, 1);
 	int result = microlauncher_msa_device_token(response->device_code, userdata);
 	if(result == 1) { // pending
 		checkDeviceCode = response->interval;
@@ -905,7 +959,7 @@ static void check_device_code(GTask *task, gpointer source_object, gpointer task
 		user->type = ACCOUNT_TYPE_MSA;
 		user->id = random_uuid();
 		g_idle_add(G_SOURCE_FUNC(gtk_window_close), popupWindow);
-		if(microlauncher_auth_user(user)) {
+		if(microlauncher_auth_user(user, NULL)) {
 			g_idle_add(G_SOURCE_FUNC(add_account_in_main), user);
 		} else {
 			free(user);
@@ -1135,12 +1189,6 @@ static GtkWidget *microlauncher_gui_page_accounts(void) {
 	return boxOuter;
 }
 
-struct AsyncStatusInfo {
-	char *stage;
-	char *label;
-	double progress;
-};
-
 static void microlauncher_gui_close_launcher(void *data) {
 	settings->width = atoi(gtk_entry_buffer_get_text(gtk_entry_get_buffer(widthEntry)));
 	settings->height = atoi(gtk_entry_buffer_get_text(gtk_entry_get_buffer(heightEntry)));
@@ -1154,15 +1202,25 @@ static gboolean close_request(GtkWindow *self, gpointer user_data) {
 	return true;
 }
 
-static gboolean microlauncher_gui_enable_kill(void *userdata) {
+struct AsyncPid {
+	GPid pid;
+	void *userdata;
+};
+
+static gboolean microlauncher_gui_enable_kill(struct AsyncPid *userdata) {
+	instancePid = userdata->pid;
+	g_object_unref(instanceCancellable);
+	instanceCancellable = NULL;
 	gtk_button_set_label(playButton, "Kill");
 	gtk_widget_set_sensitive(GTK_WIDGET(playButton), true);
 	return false;
 }
 
 static void scheduled_launcher_set_pid(GPid pid, void *userdata) {
-	instancePid = pid;
-	g_idle_add(G_SOURCE_FUNC(microlauncher_gui_enable_kill), userdata);
+	struct AsyncPid *data = g_new(struct AsyncPid, 1);
+	data->pid = pid;
+	data->userdata = userdata;
+	g_idle_add(G_SOURCE_FUNC(microlauncher_gui_enable_kill), data);
 }
 
 static void scheduled_launcher_enable_play(void *userdata) {
@@ -1210,6 +1268,35 @@ static gboolean microlauncher_gui_set_stage(char *data) {
 static void scheduled_set_stage(const char *stage, void *userdata) {
 	char *data = g_strdup(stage);
 	g_idle_add(G_SOURCE_FUNC(microlauncher_gui_set_stage), data);
+}
+
+static gboolean microlauncher_gui_show_err(char *data) {
+	if(!data) {
+		return false;
+	}
+	GtkWindow *dialog = gtk_modal_dialog_new(window);
+	// gtk_window_set_resizable(dialog, false);
+	gtk_window_set_title(dialog, "Error");
+	GtkBox *box = GTK_BOX(gtk_box_new(GTK_ORIENTATION_VERTICAL, 10));
+	gtk_widget_set_margin(GTK_WIDGET(box), 10, 10, 10, 10);
+	GtkWidget *widget = gtk_label_new(data);
+	gtk_label_set_wrap(GTK_LABEL(widget), true);
+	gtk_label_set_yalign(GTK_LABEL(widget), 0.0F);
+	gtk_widget_set_vexpand(widget, true);
+	gtk_box_append(box, widget);
+	widget = gtk_button_new_with_label("Ok");
+	gtk_widget_set_halign(widget, GTK_ALIGN_END);
+	g_signal_connect(widget, "clicked", G_CALLBACK(cancel_callback), dialog);
+	gtk_box_append(box, widget);
+	gtk_window_set_child(dialog, GTK_WIDGET(box));
+	gtk_window_present(dialog);
+	free(data);
+	return false;
+}
+
+static void scheduled_show_error(const char *msg, void *userdata) {
+	char *data = g_strdup(msg);
+	g_idle_add(G_SOURCE_FUNC(microlauncher_gui_show_err), data);
 }
 
 static void activate(GtkApplication *app, gpointer user_data) {
@@ -1267,6 +1354,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 		.instance_finished = scheduled_launcher_enable_play,
 		.instance_started = scheduled_launcher_set_pid,
 		.progress_update = scheduled_progress_update,
+		.show_error = scheduled_show_error,
 		.stage_update = scheduled_set_stage,
 		.userdata = NULL,
 	};

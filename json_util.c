@@ -11,6 +11,11 @@ int32_t json_get_int(json_object *obj, const char *key) {
 	return (json_object_is_type(val, json_type_int)) ? json_object_get_int(val) : 0;
 }
 
+int64_t json_get_int64(json_object *obj, const char *key) {
+	json_object *val = json_object_object_get(obj, key);
+	return (json_object_is_type(val, json_type_int)) ? json_object_get_int64(val) : 0;
+}
+
 const char *json_get_string(json_object *obj, const char *key) {
 	json_object *val = json_object_object_get(obj, key);
 	return (json_object_is_type(val, json_type_string)) ? json_object_get_string(val) : NULL;

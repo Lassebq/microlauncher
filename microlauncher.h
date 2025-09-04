@@ -1,5 +1,6 @@
 #pragma once
 
+#include "gio/gio.h"
 #include "glib.h"
 #include <curl/curl.h>
 #include <json_types.h>
@@ -19,6 +20,7 @@ struct Callbacks {
 	void (*instance_finished)(void *userdata);
 	void (*progress_update)(double precentage, const char *progress_msg, void *userdata);
 	void (*stage_update)(const char *progress_msg, void *userdata);
+	void (*show_error)(const char *error_message, void *userdata);
 	void *userdata;
 };
 
@@ -67,7 +69,7 @@ struct Settings {
 
 struct Instance *microlauncher_instance_get(GSList *list, const char *id);
 struct User *microlauncher_account_get(GSList *list, const char *id);
-bool microlauncher_launch_instance(const struct Instance *instance, struct User *user);
+bool microlauncher_launch_instance(const struct Instance *instance, struct User *user, GCancellable *cancellable);
 void microlauncher_save_settings(void);
 void microlauncher_load_settings(void);
 struct Settings *microlauncher_get_settings(void);
@@ -76,5 +78,5 @@ GSList **microlauncher_get_accounts(void);
 void microlauncher_set_callbacks(struct Callbacks callbacks);
 const char *microlauncher_get_account_type_name(enum AccountType accountType);
 json_object *microlauncher_http_get_json(const char *url, struct curl_slist *headers, const char *post);
-bool microlauncher_auth_user(struct User *user);
+bool microlauncher_auth_user(struct User *user, GCancellable *cancellable);
 GHashTable *microlauncher_get_manifest(void);
