@@ -81,10 +81,13 @@ void string_destroy(String *str) {
 }
 
 FILE *fopen_mkdir(const char *path, const char *mode) {
-	if(g_mkdir_with_parents(g_path_get_dirname(path), 0755) != 0) {
-		return NULL;
+	gchar *dirname = g_path_get_dirname(path);
+	FILE *fd = NULL;
+	if(g_mkdir_with_parents(dirname, 0755) == 0) {
+		fd = fopen(path, mode);
 	}
-	return fopen(path, mode);
+	g_free(dirname);
+	return fd;
 }
 
 gboolean rmdir_recursive(const gchar *path, GError **error) {

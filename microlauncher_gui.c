@@ -10,15 +10,16 @@
 #include "microlauncher_msa.h"
 #include "microlauncher_version_item.h"
 #include "util.h"
+#include "xdgutil.h"
 #include <curl/curl.h>
 #include <glib.h>
 #include <gtk/gtk.h>
 #include <stdatomic.h>
-#include <threads.h>
 #ifdef __linux
 #include <linux/limits.h>
 #elif _WIN32
-#include "processthreadsapi.h"
+#include "windows.h"
+#include "shlobj.h"
 #endif
 #include <math.h>
 #include <signal.h>
@@ -691,6 +692,11 @@ static void instance_list_view_setup_factory(GtkListItemFactory *factory, GtkLis
 	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_SECONDARY);
 	GMenu *menu = g_menu_new();
 	g_menu_append(menu, "Edit", "instance.edit");
+#ifdef _WIN32
+	g_menu_append(menu, "Create shortcut", "instance.create-launcher");
+#else
+	g_menu_append(menu, "Create launcher", "instance.create-launcher");
+#endif
 	g_menu_append(menu, "Delete", "instance.delete");
 	g_signal_connect(click, "pressed", G_CALLBACK(show_row_menu), menu);
 	gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(click));
@@ -729,10 +735,49 @@ static void instance_list_view_setup_factory(GtkListItemFactory *factory, GtkLis
 	g_object_set_data_full(G_OBJECT(list_item), "row-widgets", rw, g_free);
 }
 
+static void microlauncher_create_launcher(struct Instance *inst) {
+	char path[PATH_MAX];
+	#ifndef _WIN32
+	snprintf(path, PATH_MAX, "%s/applications/microlauncher-%s.desktop", XDG_DATA_HOME, inst->name);
+	FILE *fd = fopen_mkdir(path, "wb");
+	fprintf(fd,
+			"#!/usr/bin/env xdg-open\n"
+			"[Desktop Entry]\n"
+			"Name=%s\n"
+			"Exec=microlauncher --instance \"%s\" --saved-user\n",
+			inst->name, inst->name);
+	if(inst->icon) {
+		fprintf(fd, "Icon=%s\n", inst->icon);
+	}
+	fprintf(fd,
+		"Terminal=false\n"
+		"Type=Application\n"
+		"Categories=Game;\n");
+	fclose(fd);
+	#else
+	char dir[PATH_MAX];
+	if(SHGetFolderPathA(NULL, CSIDL_STARTMENU, NULL, 0, dir) == S_OK) {
+		snprintf(path, PATH_MAX, "%s/Programs/MicroLauncher/%s.lnk", dir, inst->name);
+		char *dirname = g_path_get_dirname(path);
+		if(g_mkdir_with_parents(dirname, 0755) == 0) {
+
+			char *cmdline = g_strdup_printf("--instance \"%s\" --saved-user", inst->name);
+			g_print("%s\n", path);
+			free(dirname);
+			dirname = g_path_get_dirname(EXEC_BINARY);
+			CreateShortcut(EXEC_BINARY, cmdline, path, SW_SHOWNORMAL, dirname, EXEC_BINARY, 0);
+		}
+		free(dirname);
+	}
+	#endif
+}
+
 static void instance_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant *parameter, gpointer *data) {
 	struct Instance *inst = (struct Instance *)data;
 	if(strcmp(g_action_get_name(G_ACTION(simple_action)), "edit") == 0) {
 		microlauncher_modify_instance_window(NULL, inst);
+	} else if (strcmp(g_action_get_name(G_ACTION(simple_action)), "create-launcher") == 0) {
+		microlauncher_create_launcher(inst);
 	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "delete") == 0) {
 		remove_instance(inst);
 	}
@@ -747,14 +792,14 @@ static void instance_list_view_bind_factory(GtkListItemFactory *factory, GtkList
 	GSimpleActionGroup *actions = g_simple_action_group_new();
 	GSimpleAction *action;
 
-	action = g_simple_action_new("edit", NULL);
-	g_signal_connect(action, "activate", G_CALLBACK(instance_action), instance);
-	g_action_map_add_action(G_ACTION_MAP(actions), G_ACTION(action));
-
-	action = g_simple_action_new("delete", NULL);
-	g_signal_connect(action, "activate", G_CALLBACK(instance_action), instance);
-	g_action_map_add_action(G_ACTION_MAP(actions), G_ACTION(action));
-
+	const char *action_names[] = {"edit", "create-launcher", "delete", NULL};
+	int i = 0;
+	while(action_names[i]) {
+		action = g_simple_action_new(action_names[i], NULL);
+		g_signal_connect(action, "activate", G_CALLBACK(instance_action), instance);
+		g_action_map_add_action(G_ACTION_MAP(actions), G_ACTION(action));
+		i++;
+	}
 	gtk_widget_insert_action_group(rw->grid, "instance", G_ACTION_GROUP(actions));
 
 	gtk_image_set_from_file(rw->icon, instance->icon);

@@ -15,6 +15,8 @@
 
 #define LAUNCHER_NAME "MicroLauncher"
 
+extern char *EXEC_BINARY;
+
 struct Callbacks {
 	void (*instance_started)(GPid pid, void *userdata);
 	void (*instance_finished)(void *userdata);

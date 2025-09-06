@@ -27,25 +27,23 @@ static GSList *accounts;
 static CURL *globalCurlHandle;
 static GHashTable *manifest;
 static struct Settings settings = {0};
+char *EXEC_BINARY;
 
-// Used by main
-static struct Instance *active_instance = NULL;
-static struct User *active_user = NULL;
+static char *active_instance = NULL;
+static char *active_user = NULL;
+static bool use_saved_user = false;
 
 #define run_callback(cb, ...)                          \
 	if(callbacks.cb) {                                 \
 		callbacks.cb(__VA_ARGS__, callbacks.userdata); \
 	}
 
-struct Param {
-	const char *name;
-	char *val;
-};
-
-struct Param params[] = {
-	{.name = "instance"},
-	{.name = "user"},
-	{NULL, NULL}
+static GOptionEntry entries[] =
+	{
+		{"instance",	 'i', 0, G_OPTION_ARG_STRING, &active_instance, "Instance to launch",									  NULL},
+		{"user",		 'u', 0, G_OPTION_ARG_STRING, &active_user,		"Saved user GUID to authenticate as",					  NULL},
+		{"saved-user", 0,	  0, G_OPTION_ARG_NONE,	&use_saved_user,	 "Use saved user instead of explicitly specifying user", NULL},
+		G_OPTION_ENTRY_NULL
 };
 
 struct Callbacks callbacks;
@@ -233,22 +231,18 @@ bool microlauncher_init(int argc, char **argv) {
 	if(!globalCurlHandle) {
 		fprintf(stderr, "Can't initialize curl\n"); // Non fatal
 	}
-
-	for(int i = 0; i < argc; i++) {
-		if(!argv[i]) {
-			break;
-		}
-		// starts with --
-		if(argv[i][0] == '-' && argv[i][1] == '-') {
-			struct Param *p = params;
-			while(p->name && strcmp(p->name, argv[i] + 2) != 0) {
-				p++;
-			}
-			if(p->name) {
-				p->val = argv[i + 1];
-			}
-		}
+	GFile *file = g_file_new_for_path(argv[0]);
+	if(file && g_file_query_exists(file, NULL)) {
+		EXEC_BINARY = g_file_get_path(file);
+	} else {
+		EXEC_BINARY = argv[0];
 	}
+	g_print("%s\n", EXEC_BINARY);
+	GOptionContext *context;
+	context = g_option_context_new("");
+	g_option_context_add_main_entries(context, entries, NULL);
+	g_option_context_parse(context, &argc, &argv, NULL);
+
 	if(!microlauncher_init_config()) {
 		fprintf(stdout, "No config, using fresh config\n");
 	}
@@ -304,6 +298,7 @@ size_t write_callback(void *ptr, size_t size, size_t nmemb, void *userdata) {
 void microlauncher_set_curl_opts(CURL *curl) {
 	curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA);
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, CURLFOLLOW_ALL);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
 }
 
 bool microlauncher_http_get_with_handle(CURL *curl, const char *url, const char *save_location) {
@@ -959,6 +954,18 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	if(!instance || !user) {
 		return false;
 	}
+	if(!instance->location || strlen(instance->location) == 0) {
+		run_callback(show_error, "No game directory specified");
+		return false;
+	}
+	char *str;
+	GFile *instanceDir = g_file_new_for_path(instance->location);
+	if(g_file_query_file_type(instanceDir, G_FILE_QUERY_INFO_NONE, NULL) != G_FILE_TYPE_DIRECTORY) {
+		str = g_strdup_printf("Directory %s doesn't exist", instance->location);
+		run_callback(show_error, str);
+		free(str);
+		return false;
+	}
 	bool ret = false;
 	int m = 0;
 	char *malloc_strs[1024];
@@ -972,7 +979,7 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	snprintf(versions_dir, PATH_MAX, "%s/versions", settings.launcher_root);
 	snprintf(libraries_dir, PATH_MAX, "%s/libraries", settings.launcher_root);
 	snprintf(assets_dir, PATH_MAX, "%s/assets", settings.launcher_root);
-	char *str = random_uuid();
+	str = random_uuid();
 	snprintf(natives_dir, PATH_MAX, "%s/natives/%s", TEMPDIR, str);
 	free(str);
 	json_object *json = microlauncher_fetch_version(instance->version, versions_dir, libraries_dir, natives_dir, assets_dir, cancellable, path);
@@ -1144,7 +1151,15 @@ int main(int argc, char **argv) {
 		return EXIT_FAILURE;
 	}
 
-	if(microlauncher_launch_instance(active_instance, active_user, NULL)) {
+	GSList *instances = *microlauncher_get_instances();
+	GSList *accounts = *microlauncher_get_accounts();
+	struct User *user;
+	if(use_saved_user) {
+		user = settings.user;
+	} else {
+		user = microlauncher_account_get(accounts, active_user);
+	}
+	if(microlauncher_launch_instance(microlauncher_instance_get(instances, active_instance), user, NULL)) {
 		return EXIT_SUCCESS;
 	}
 

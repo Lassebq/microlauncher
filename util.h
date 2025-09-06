@@ -1,6 +1,13 @@
 #pragma once
+
 #include "glib.h"
-#include "json_types.h"
+
+#ifdef _WIN32
+#include "windows.h"
+#endif
+
+G_BEGIN_DECLS
+
 #include <openssl/sha.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -92,3 +99,9 @@ GPid util_fork_execv(const char *dir, char *const *argv);
 bool util_waitpid(GPid pid, int *status);
 
 bool util_kill_process(GPid pid);
+
+#ifdef _WIN32
+HRESULT CreateShortcut(LPCSTR pszTargetfile, LPCSTR pszTargetargs, LPCSTR pszLinkfile, int iShowmode, LPCSTR pszCurdir, LPCSTR pszIconfile, int iIconindex);
+#endif
+
+G_END_DECLS

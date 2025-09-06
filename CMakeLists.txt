@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 4.0.3)
-project(microlauncher VERSION 1.0.0 LANGUAGES C)
+project(microlauncher VERSION 1.0.0 LANGUAGES C CXX)
 
 set(MICROSOFT_CLIENT_ID "95984717-05f1-4b52-8a66-064d0e1e5b55" CACHE STRING "Azure application client ID used for microsoft authentication")
 option(USE_MOJANG_MANIFEST "Uses official mojang manifest without tweaked client JSONs" OFF)
@@ -14,6 +14,9 @@ set(SOURCES
   json_util.c
   gtk_util.c
 )
+if(WIN32)
+    list(APPEND SOURCES util.cpp)
+endif()
 
 find_package(PkgConfig REQUIRED)
 set(DEPS
