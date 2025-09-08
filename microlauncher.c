@@ -388,7 +388,7 @@ char *microlauncher_get_library_path(const char *name, const char *classifier, c
 	return NULL;
 }
 
-bool microlauncher_fetch_artifact(const char *url, const char *path, const char *label, const char *sha1, int size, int total_size, int *download_size) {
+bool microlauncher_fetch_artifact(const char *url, const char *path, const char *label, const char *sha1, long size, long total_size, long *download_size) {
 	if(!path) {
 		return false;
 	}
@@ -430,7 +430,7 @@ redownload:
 	return true;
 }
 
-bool microlauncher_fetch_library(json_object *libObj, const char *libraries_path, const char *natives_path, int total_size, int *download_size, char *failedUrl) {
+bool microlauncher_fetch_library(json_object *libObj, const char *libraries_path, const char *natives_path, long total_size, long *download_size, char *failedUrl) {
 	json_object *downloads = json_object_object_get(libObj, "downloads");
 	json_object *artifact = json_object_object_get(downloads, "artifact");
 	json_object *classifiers = json_object_object_get(downloads, "classifiers");
@@ -459,7 +459,7 @@ bool microlauncher_fetch_library(json_object *libObj, const char *libraries_path
 		   realpath,
 		   NULL,
 		   json_get_string(artifact, "sha1"),
-		   json_get_int(artifact, "size"),
+		   json_get_int64(artifact, "size"),
 		   total_size, download_size)) {
 		snprintf(failedUrl, PATH_MAX, "%s", url);
 		return false;
@@ -484,8 +484,8 @@ bool microlauncher_fetch_library(json_object *libObj, const char *libraries_path
 			   url,
 			   realpath,
 			   NULL,
-			   json_get_string(artifact, "sha1"),
-			   json_get_int(artifact, "size"),
+			   json_get_string(obj, "sha1"),
+			   json_get_int64(obj, "size"),
 			   total_size, download_size)) {
 			snprintf(failedUrl, PATH_MAX, "%s", url);
 			return false;
@@ -628,8 +628,8 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 	client = json_object_object_get(downloads, "client");
 	snprintf(path, PATH_MAX, "%s/%s/%s.jar", versions_path, str, str);
 	// Count total size
-	int total_size = json_get_int(client, "size");
-	int current_size = 0;
+	long total_size = json_get_int64(client, "size");
+	long current_size = 0;
 	if(json_object_is_type(libraries, json_type_array)) {
 		size_t length = json_object_array_length(libraries);
 
@@ -641,7 +641,7 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 			downloads = json_object_object_get(iter, "downloads");
 			artifact = json_object_object_get(downloads, "artifact");
 			if(artifact) {
-				total_size += json_get_int(artifact, "size");
+				total_size += json_get_int64(artifact, "size");
 			}
 
 			const char *classifier = json_get_string(json_object_object_get(iter, "natives"), OS_NAME);
@@ -649,7 +649,7 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 				obj = json_object_object_get(downloads, "classifiers");
 				obj = json_object_object_get(obj, classifier);
 				if(obj) {
-					total_size += json_get_int(obj, "size");
+					total_size += json_get_int64(obj, "size");
 				}
 			}
 		}
@@ -664,7 +664,7 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 		   path,
 		   NULL,
 		   json_get_string(client, "sha1"),
-		   json_get_int(client, "size"),
+		   json_get_int64(client, "size"),
 		   total_size, &current_size)) {
 		snprintf(failedUrl, PATH_MAX, "%s", str);
 		goto cancel;
@@ -691,9 +691,9 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 	run_callback(stage_update, "Downloading assets");
 	obj = json_object_object_get(json, "assetIndex");
 	snprintf(path, PATH_MAX, "%s/indexes/%s.json", assets_dir, json_get_string(obj, "id"));
-	total_size = json_get_int(obj, "totalSize") + json_get_int(obj, "size"); // assets.json + all assets size
+	total_size = json_get_int64(obj, "totalSize") + json_get_int64(obj, "size"); // assets.json + all assets size
 	current_size = 0;
-	microlauncher_fetch_artifact(json_get_string(obj, "url"), path, NULL, json_get_string(obj, "sha1"), json_get_int(obj, "size"), total_size, &current_size);
+	microlauncher_fetch_artifact(json_get_string(obj, "url"), path, NULL, json_get_string(obj, "sha1"), json_get_int64(obj, "size"), total_size, &current_size);
 	assets_json = json_from_file(path);
 	obj = json_object_object_get(assets_json, "objects");
 	if(json_object_is_type(obj, json_type_object)) {
@@ -701,7 +701,7 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 			const char *hash = json_get_string(val, "hash");
 			snprintf(path, PATH_MAX, "%s/objects/%c%c/%s", assets_dir, *hash, *(hash + 1), hash);
 			snprintf(url, PATH_MAX, "https://resources.download.minecraft.net/%c%c/%s", *hash, *(hash + 1), hash);
-			if(!microlauncher_fetch_artifact(url, path, key, hash, json_get_int(val, "size"), total_size, &current_size)) {
+			if(!microlauncher_fetch_artifact(url, path, key, hash, json_get_int64(val, "size"), total_size, &current_size)) {
 				snprintf(failedUrl, PATH_MAX, "%s", url);
 				goto cancel;
 			}
@@ -929,16 +929,6 @@ static int add_arguments(json_object *array, const char *const *replaces, GSList
 				}
 				break;
 			case json_type_string:
-				if(strstr(json_object_get_string(iter), "xuid")) {
-					break;
-				}
-				if(strstr(json_object_get_string(iter), "clientId")) {
-					break;
-				}
-				if(strstr(json_object_get_string(iter), "clientid")) {
-					break;
-				}
-
 				argv[j] = str_to_free[j] = apply_replaces(replaces, json_object_get_string(iter));
 				j++;
 				break;
@@ -1000,9 +990,9 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	const char *id = json_get_string(json, "id");
 	const char *minecraftArguments = json_get_string(json, "minecraftArguments");
 	char *cp = microlauncher_get_javacp(json, versions_dir, libraries_dir);
-	json_object *arguments = json_object_object_get(json, "arguments");
-	json_object *argumentsGame = json_object_object_get(arguments, "game");
-	json_object *argumentsJvm = json_object_object_get(arguments, "jvm");
+	json_object *obj = json_object_object_get(json, "arguments");
+	json_object *argumentsGame = json_object_object_get(obj, "game");
+	json_object *argumentsJvm = json_object_object_get(obj, "jvm");
 	int n = 1;
 	n += user->accessToken ? strlen(user->accessToken) : 0;
 	n += user->uuid ? strlen(user->uuid) : 0;
