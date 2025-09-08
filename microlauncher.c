@@ -237,7 +237,6 @@ bool microlauncher_init(int argc, char **argv) {
 	} else {
 		EXEC_BINARY = argv[0];
 	}
-	g_print("%s\n", EXEC_BINARY);
 	GOptionContext *context;
 	context = g_option_context_new("");
 	g_option_context_add_main_entries(context, entries, NULL);

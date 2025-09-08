@@ -1,6 +1,4 @@
-#include "gdk/gdkkeysyms.h"
-#include "gio/gio.h"
-#include "gio/gmenumodel.h"
+#include "gdk/gdk.h"
 #include "glib-object.h"
 #include "gtk_util.h"
 #include "json_object.h"
@@ -18,8 +16,8 @@
 #ifdef __linux
 #include <linux/limits.h>
 #elif _WIN32
-#include "windows.h"
 #include "shlobj.h"
+#include "windows.h"
 #endif
 #include <math.h>
 #include <signal.h>
@@ -210,7 +208,7 @@ static void create_or_modify_instance(GtkButton *button, void *userdata) {
 		remove_instance(createInstance->toReplace);
 	}
 	add_instance(inst);
-	if(wasActiveInstance) {
+	if(wasActiveInstance || createInstance->toReplace == NULL) {
 		settings->instance = inst;
 		GtkSingleSelection *selection = GTK_SINGLE_SELECTION(gtk_list_view_get_model(instancesView));
 		guint index = gtk_string_list_find(instancesList, inst->name);
@@ -737,7 +735,7 @@ static void instance_list_view_setup_factory(GtkListItemFactory *factory, GtkLis
 
 static void microlauncher_create_launcher(struct Instance *inst) {
 	char path[PATH_MAX];
-	#ifndef _WIN32
+#ifndef _WIN32
 	snprintf(path, PATH_MAX, "%s/applications/microlauncher-%s.desktop", XDG_DATA_HOME, inst->name);
 	FILE *fd = fopen_mkdir(path, "wb");
 	fprintf(fd,
@@ -750,11 +748,11 @@ static void microlauncher_create_launcher(struct Instance *inst) {
 		fprintf(fd, "Icon=%s\n", inst->icon);
 	}
 	fprintf(fd,
-		"Terminal=false\n"
-		"Type=Application\n"
-		"Categories=Game;\n");
+			"Terminal=false\n"
+			"Type=Application\n"
+			"Categories=Game;\n");
 	fclose(fd);
-	#else
+#else
 	char dir[PATH_MAX];
 	if(SHGetFolderPathA(NULL, CSIDL_STARTMENU, NULL, 0, dir) == S_OK) {
 		snprintf(path, PATH_MAX, "%s/Programs/MicroLauncher/%s.lnk", dir, inst->name);
@@ -769,18 +767,89 @@ static void microlauncher_create_launcher(struct Instance *inst) {
 		}
 		free(dirname);
 	}
-	#endif
+#endif
 }
 
 static void instance_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant *parameter, gpointer *data) {
 	struct Instance *inst = (struct Instance *)data;
 	if(strcmp(g_action_get_name(G_ACTION(simple_action)), "edit") == 0) {
 		microlauncher_modify_instance_window(NULL, inst);
-	} else if (strcmp(g_action_get_name(G_ACTION(simple_action)), "create-launcher") == 0) {
+	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "create-launcher") == 0) {
 		microlauncher_create_launcher(inst);
 	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "delete") == 0) {
 		remove_instance(inst);
 	}
+}
+
+void reorder_list(GSList **list, void *(*data_get_func)(GSList *list, const char *key), GtkStringList *orderList) {
+	GSList *newList = NULL;
+	for(guint i = 0; i < g_list_model_get_n_items(G_LIST_MODEL(orderList)); i++) {
+		newList = g_slist_append(newList, data_get_func(*list, gtk_string_list_get_string(orderList, i)));
+	}
+	*list = newList;
+}
+
+typedef void *(*DataGetFunc)(GSList *list, const char *key);
+
+struct DropUserData {
+	GtkListItem *list_item;
+	GSList **list;
+	DataGetFunc data_get_func;
+};
+
+static gboolean on_drop(GtkDropTarget *target,
+					const GValue *value,
+					double x,
+					double y,
+					gpointer user_data) {
+	struct DropUserData *ondrop = user_data;
+	GtkListItem *list_item = GTK_LIST_ITEM(ondrop->list_item);
+	GtkStringList *store = g_object_get_data(G_OBJECT(list_item), "store");
+	guint pos = gtk_list_item_get_position(list_item);
+	if(!G_VALUE_HOLDS(value, G_TYPE_POINTER)) {
+		return false;
+	}
+	GtkListItem *dropItem = g_value_get_pointer(value);
+
+	guint old_pos = gtk_list_item_get_position(dropItem);
+
+	if(old_pos != G_MAXUINT && old_pos != pos) {
+		const char *oldstr = gtk_string_list_get_string(store, old_pos);
+		gtk_string_list_remove(store, old_pos);
+		const char *insert[] = { oldstr, NULL };
+		gtk_string_list_splice(store, pos, 0, insert);
+		reorder_list(ondrop->list, ondrop->data_get_func, store);
+	}
+	return true;
+}
+
+static GdkContentProvider *on_drag_prepare(GtkDragSource *src,
+										   double x, double y,
+										   gpointer user_data) {
+	graphene_point_t point = GRAPHENE_POINT_INIT(x, y);
+	g_object_set_data_full(G_OBJECT(src), "drag-point", g_memdup2(&point, sizeof(graphene_point_t)), g_free);
+	GtkListItem *li = GTK_LIST_ITEM(user_data);
+	return gdk_content_provider_new_typed(G_TYPE_POINTER, li);
+}
+
+static void on_drag_begin(GtkDragSource *source,
+						  GdkDrag *drag,
+						  GtkWidget *self) {
+	// Set the widget as the drag icon
+	graphene_point_t point = *(graphene_point_t *)g_object_get_data(G_OBJECT(source), "drag-point");
+	GdkPaintable *paintable = gtk_widget_paintable_new(self);
+	int width = gtk_widget_get_width(self);
+	int height = gtk_widget_get_height(self);
+
+	// Snapshot for drawing
+	GtkSnapshot *snapshot = gtk_snapshot_new();
+
+	gdk_paintable_snapshot(paintable, snapshot, width, height);
+
+	// Convert to texture
+	paintable = gtk_snapshot_free_to_paintable(snapshot, NULL);
+	gtk_drag_source_set_icon(source, paintable, point.x, point.y);
+	g_object_unref(paintable);
 }
 
 static void instance_list_view_bind_factory(GtkListItemFactory *factory, GtkListItem *list_item, gpointer user_data) {
@@ -801,6 +870,23 @@ static void instance_list_view_bind_factory(GtkListItemFactory *factory, GtkList
 		i++;
 	}
 	gtk_widget_insert_action_group(rw->grid, "instance", G_ACTION_GROUP(actions));
+
+	GtkDragSource *drag_source = gtk_drag_source_new();
+	gtk_drag_source_set_actions(drag_source, GDK_ACTION_MOVE);
+
+	g_signal_connect(drag_source, "prepare", G_CALLBACK(on_drag_prepare), list_item);
+	g_signal_connect(drag_source, "drag-begin", G_CALLBACK(on_drag_begin), rw->grid);
+
+	gtk_widget_add_controller(gtk_widget_get_parent(rw->grid), GTK_EVENT_CONTROLLER(drag_source));
+
+	g_object_set_data(G_OBJECT(list_item), "store", user_data);
+	GtkDropTarget *target = gtk_drop_target_new(G_TYPE_POINTER, GDK_ACTION_MOVE);
+	struct DropUserData *ondrop = g_new(struct DropUserData, 1);
+	ondrop->list_item = list_item;
+	ondrop->list = microlauncher_get_instances();
+	ondrop->data_get_func = (DataGetFunc)microlauncher_instance_get;
+	g_signal_connect_data(target, "drop", G_CALLBACK(on_drop), ondrop, (GClosureNotify)g_free, 0);
+	gtk_widget_add_controller(gtk_widget_get_parent(rw->grid), GTK_EVENT_CONTROLLER(target));
 
 	gtk_image_set_from_file(rw->icon, instance->icon);
 	gtk_label_set_label(rw->instanceLabel, instance->name);
@@ -863,15 +949,19 @@ static GtkWidget *microlauncher_gui_page_instances(void) {
 	}
 
 	GtkSingleSelection *selection = gtk_single_selection_new(G_LIST_MODEL(instancesList));
+	gtk_single_selection_set_can_unselect(selection, true);
+	gtk_single_selection_set_autoselect(selection, false);
 	GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
 	g_signal_connect(factory, "setup", G_CALLBACK(instance_list_view_setup_factory), NULL);
-	g_signal_connect(factory, "bind", G_CALLBACK(instance_list_view_bind_factory), NULL);
+	g_signal_connect(factory, "bind", G_CALLBACK(instance_list_view_bind_factory), instancesList);
 
 	widget = gtk_list_view_new(GTK_SELECTION_MODEL(selection), factory);
 	instancesView = GTK_LIST_VIEW(widget);
+	gtk_single_selection_set_selected(selection, GTK_INVALID_LIST_POSITION);
 	if(settings->instance) {
 		gtk_single_selection_set_selected(selection, gtk_string_list_find(instancesList, settings->instance->name));
 	}
+	// This signal doesn't always fire. If there's one instance total you can't re-select instance to make it active
 	g_signal_connect(selection, "selection-changed", G_CALLBACK(instance_selection_changed), instancesList);
 	g_signal_connect(widget, "activate", G_CALLBACK(activate_instance_row), instancesList);
 	gtk_widget_add_css_class(widget, "rich-list");
@@ -953,6 +1043,23 @@ static void account_list_view_bind_factory(GtkListItemFactory *factory, GtkListI
 	g_action_map_add_action(G_ACTION_MAP(actions), G_ACTION(action));
 
 	gtk_widget_insert_action_group(rw->grid, "account", G_ACTION_GROUP(actions));
+
+	GtkDragSource *drag_source = gtk_drag_source_new();
+	gtk_drag_source_set_actions(drag_source, GDK_ACTION_MOVE);
+
+	g_signal_connect(drag_source, "prepare", G_CALLBACK(on_drag_prepare), list_item);
+	g_signal_connect(drag_source, "drag-begin", G_CALLBACK(on_drag_begin), rw->grid);
+
+	gtk_widget_add_controller(gtk_widget_get_parent(rw->grid), GTK_EVENT_CONTROLLER(drag_source));
+
+	g_object_set_data(G_OBJECT(list_item), "store", user_data);
+	GtkDropTarget *target = gtk_drop_target_new(G_TYPE_POINTER, GDK_ACTION_MOVE);
+	struct DropUserData *ondrop = g_new(struct DropUserData, 1);
+	ondrop->list_item = list_item;
+	ondrop->list = microlauncher_get_accounts();
+	ondrop->data_get_func = (DataGetFunc)microlauncher_account_get;
+	g_signal_connect_data(target, "drop", G_CALLBACK(on_drop), ondrop, (GClosureNotify)g_free, 0);
+	gtk_widget_add_controller(gtk_widget_get_parent(rw->grid), GTK_EVENT_CONTROLLER(target));
 
 	gtk_label_set_label(rw->nameLabel, account->name);
 	gtk_label_set_label(rw->typeLabel, microlauncher_get_account_type_name(account->type));
@@ -1211,11 +1318,14 @@ static GtkWidget *microlauncher_gui_page_accounts(void) {
 	}
 
 	GtkSingleSelection *selection = gtk_single_selection_new(G_LIST_MODEL(accountsList));
+	gtk_single_selection_set_can_unselect(selection, true);
+	gtk_single_selection_set_autoselect(selection, false);
 	GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
 	g_signal_connect(factory, "setup", G_CALLBACK(account_list_view_setup_factory), NULL);
-	g_signal_connect(factory, "bind", G_CALLBACK(account_list_view_bind_factory), NULL);
+	g_signal_connect(factory, "bind", G_CALLBACK(account_list_view_bind_factory), accountsList);
 
 	widget = gtk_list_view_new(GTK_SELECTION_MODEL(selection), factory);
+	gtk_single_selection_set_selected(selection, GTK_INVALID_LIST_POSITION);
 	if(settings->user) {
 		gtk_single_selection_set_selected(selection, gtk_string_list_find(accountsList, settings->user->id));
 	}
