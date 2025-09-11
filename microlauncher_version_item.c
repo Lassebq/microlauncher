@@ -2,6 +2,13 @@
 #include "glib-object.h"
 #include "glib.h"
 
+enum {
+	PROP_VERSION_LABEL = 1,
+	PROP_VERSION_TYPE,
+	PROP_RELEASE_TIME,
+	N_PROPERTIES
+};
+
 static GParamSpec *properties[N_PROPERTIES] = {NULL};
 
 G_DEFINE_TYPE(VersionItem, microlauncher_version_item, G_TYPE_OBJECT)
@@ -21,7 +28,23 @@ void microlauncher_version_item_dispose(GObject *self) {
 }
 
 static void microlauncher_version_item_set_property(GObject *object, guint property_id, const GValue *value, GParamSpec *pspec) {
-	G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
+	VersionItem *self = MICROLAUNCHER_VERSION_ITEM(object);
+	switch(property_id) {
+		case PROP_VERSION_LABEL:
+			g_free(self->version);
+			self->version = g_strdup(g_value_get_string(value));
+			return;
+		case PROP_VERSION_TYPE:
+			g_free(self->type);
+			self->type = g_strdup(g_value_get_string(value));
+			return;
+		case PROP_RELEASE_TIME:
+			g_free(self->releaseTime);
+			self->releaseTime = g_strdup(g_value_get_string(value));
+			return;
+		default:
+			G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
+	}
 }
 
 static void microlauncher_version_item_get_property(GObject *object, guint property_id, GValue *value, GParamSpec *pspec) {
@@ -47,15 +70,15 @@ static void microlauncher_version_item_class_init(VersionItemClass *klass) {
 
 	properties[PROP_VERSION_LABEL] = g_param_spec_string(
 		"version", NULL, NULL,
-		NULL, G_PARAM_READABLE);
+		NULL, G_PARAM_READABLE | G_PARAM_WRITABLE);
 
 	properties[PROP_VERSION_TYPE] = g_param_spec_string(
 		"type", NULL, NULL,
-		NULL, G_PARAM_READABLE);
+		NULL, G_PARAM_READABLE | G_PARAM_WRITABLE);
 
 	properties[PROP_RELEASE_TIME] = g_param_spec_string(
 		"releaseTime", NULL, NULL,
-		NULL, G_PARAM_READABLE);
+		NULL, G_PARAM_READABLE | G_PARAM_WRITABLE);
 	object_class->get_property = microlauncher_version_item_get_property;
 	object_class->set_property = microlauncher_version_item_set_property;
 	g_object_class_install_properties(object_class, G_N_ELEMENTS(properties), properties);
@@ -66,8 +89,8 @@ VersionItem *microlauncher_version_item_new(const char *version, const char *typ
 	self->version = g_strdup(version);
 	self->type = g_strdup(type);
 	self->releaseTime = g_strdup(releaseTime);
-	g_object_notify(G_OBJECT(self), "version");
-	g_object_notify(G_OBJECT(self), "type");
-	g_object_notify(G_OBJECT(self), "releaseTime");
+	g_object_notify_by_pspec(G_OBJECT(self), properties[PROP_VERSION_LABEL]);
+	g_object_notify_by_pspec(G_OBJECT(self), properties[PROP_VERSION_TYPE]);
+	g_object_notify_by_pspec(G_OBJECT(self), properties[PROP_RELEASE_TIME]);
 	return self;
 }

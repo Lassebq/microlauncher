@@ -1,6 +1,11 @@
+#include "gio/gio.h"
 #include "glib-object.h"
 #include "glib.h"
 #include "gtk/gtk.h"
+#include "gtk/gtkdropdown.h"
+#include "gtk/gtkexpression.h"
+#include "gtk/gtkshortcut.h"
+#include "pango/pango-layout.h"
 
 GtkWidget *gtk_widget_with_label(gchar *labelStr, GtkWidget *widget) {
 	GtkBox *box = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10));
@@ -81,4 +86,65 @@ void gtk_open_file(const char *path) {
 	GtkFileLauncher *launcher = gtk_file_launcher_new(file);
 	gtk_file_launcher_launch(launcher, NULL, NULL, NULL, NULL);
 	g_object_unref(file);
+}
+
+static void simple_drop_down_setup(GtkListItemFactory *factory, GtkListItem *list_item, gpointer user_data) {
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	GtkWidget *label = gtk_label_new(NULL);
+	gtk_label_set_xalign(GTK_LABEL(label), 0.0);
+	gtk_box_append(GTK_BOX(box), label);
+	GtkWidget *icon = g_object_new(GTK_TYPE_IMAGE,
+								   "icon-name", "object-select-symbolic",
+								   "accessible-role", GTK_ACCESSIBLE_ROLE_PRESENTATION,
+								   NULL);
+	gtk_box_append(GTK_BOX(box), icon);
+	gtk_list_item_set_child(list_item, box);
+}
+
+static void simple_drop_down_selection_changed(GtkDropDown *self, GParamSpec *pspec, GtkListItem *list_item) {
+	GtkWidget *box;
+	GtkWidget *icon;
+
+	box = gtk_list_item_get_child(list_item);
+	icon = gtk_widget_get_last_child(box);
+
+	if(gtk_drop_down_get_selected_item(self) == gtk_list_item_get_item(list_item))
+		gtk_widget_set_opacity(icon, 1.0);
+	else
+		gtk_widget_set_opacity(icon, 0.0);
+}
+
+static void simple_drop_down_root_changed(GtkWidget *box, GParamSpec *pspec, GtkDropDown *self) {
+	GtkWidget *label = gtk_widget_get_first_child(box);
+	GtkWidget *icon = gtk_widget_get_last_child(box);
+
+	if(gtk_widget_get_ancestor(box, GTK_TYPE_POPOVER) != NULL) {
+		gtk_widget_set_visible(icon, TRUE);
+		gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_NONE); // Drop down menu items shouldn't be trimmed down
+	} else {
+		gtk_widget_set_visible(icon, FALSE);
+		gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_END);
+	}
+}
+
+static void simple_drop_down_bind(GtkListItemFactory *factory, GtkListItem *list_item, gpointer user_data) {
+	GtkDropDown *self = user_data;
+	GtkStringObject *obj = gtk_list_item_get_item(list_item);
+	GtkWidget *box = gtk_list_item_get_child(list_item);
+	GtkWidget *label = gtk_widget_get_first_child(box);
+	gtk_label_set_label(GTK_LABEL(label), gtk_string_object_get_string(obj));
+
+	g_signal_connect(self, "notify::selected-item", G_CALLBACK(simple_drop_down_selection_changed), list_item);
+	simple_drop_down_selection_changed(self, NULL, list_item);
+	g_signal_connect(box, "notify::root", G_CALLBACK(simple_drop_down_root_changed), self);
+	simple_drop_down_root_changed(box, NULL, self);
+}
+
+GtkWidget *gtk_drop_down_simple_new(GtkStringList *list, GtkExpression *expression) {
+	GtkDropDown *dropDown = GTK_DROP_DOWN(gtk_drop_down_new(G_LIST_MODEL(list), expression));
+	GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
+	g_signal_connect(factory, "setup", G_CALLBACK(simple_drop_down_setup), NULL);
+	g_signal_connect(factory, "bind", G_CALLBACK(simple_drop_down_bind), dropDown);
+	gtk_drop_down_set_factory(dropDown, factory);
+	return GTK_WIDGET(dropDown);
 }

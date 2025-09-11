@@ -1,0 +1,23 @@
+#pragma once
+
+#include <glib-object.h>
+
+G_BEGIN_DECLS
+
+struct _MicrolauncherInstance {
+	GObject parent_instance;
+	char *name;
+	char *location;
+	char *version;
+	char *icon;
+	char *javaLocation;
+	GSList *extraGameArgs;
+	GSList *jvmArgs;
+};
+
+#define MICROLAUNCHER_INSTANCE_TYPE (microlauncher_instance_get_type())
+G_DECLARE_FINAL_TYPE(MicrolauncherInstance, microlauncher_instance, MICROLAUNCHER, INSTANCE, GObject);
+
+MicrolauncherInstance *microlauncher_instance_new(void);
+
+G_END_DECLS

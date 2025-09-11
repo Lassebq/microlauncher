@@ -410,7 +410,7 @@ char **get_commandv(char *cmdline) {
 	cmdv[i++] = token_start;
 	cmdv[i++] = NULL;
 	heap = malloc(sizeof(void *) * i);
-	memcpy(heap, cmdv, i);
+	memcpy(heap, cmdv, sizeof(void *) * i);
 	return heap;
 }
 

@@ -1,5 +1,6 @@
 #include "microlauncher.h"
 #include "gio/gio.h"
+#include "glib-object.h"
 #include "glib.h"
 #include "json.h"
 #include "json_object.h"
@@ -33,11 +34,6 @@ static char *active_instance = NULL;
 static char *active_user = NULL;
 static bool use_saved_user = false;
 
-#define run_callback(cb, ...)                          \
-	if(callbacks.cb) {                                 \
-		callbacks.cb(__VA_ARGS__, callbacks.userdata); \
-	}
-
 static GOptionEntry entries[] =
 	{
 		{"instance",	 'i', 0, G_OPTION_ARG_STRING, &active_instance, "Instance to launch",									  NULL},
@@ -48,8 +44,8 @@ static GOptionEntry entries[] =
 
 struct Callbacks callbacks;
 
-struct Instance *microlauncher_instance_get(GSList *list, const char *id) {
-	struct Instance *inst;
+MicrolauncherInstance *microlauncher_instance_get(GSList *list, const char *id) {
+	MicrolauncherInstance *inst;
 	GSList *node = list;
 	while(node) {
 		inst = node->data;
@@ -61,8 +57,8 @@ struct Instance *microlauncher_instance_get(GSList *list, const char *id) {
 	return NULL;
 }
 
-struct User *microlauncher_account_get(GSList *list, const char *id) {
-	struct User *usr;
+MicrolauncherAccount *microlauncher_account_get(GSList *list, const char *id) {
+	MicrolauncherAccount *usr;
 	GSList *node = list;
 	while(node) {
 		usr = node->data;
@@ -74,28 +70,32 @@ struct User *microlauncher_account_get(GSList *list, const char *id) {
 	return NULL;
 }
 
-void microlauncher_load_account(json_object *obj, struct User *user) {
-	user->name = g_strdup(json_get_string(obj, "name"));
-	user->uuid = g_strdup(json_get_string(obj, "uuid"));
-	user->type = json_get_int(obj, "type");
+MicrolauncherAccount *microlauncher_load_account(json_object *obj) {
+	enum AccountType type = json_get_int(obj, "type");
+	struct MicrosoftUser *userdata;
+
+	MicrolauncherAccount *user = microlauncher_account_new(NULL, type);
+	microlauncher_account_set_name(user, json_get_string(obj, "name"));
+	microlauncher_account_set_uuid(user, json_get_string(obj, "uuid"));
 	user->id = g_strdup(json_get_string(obj, "id"));
 	json_object *data = json_object_object_get(obj, "data");
 	switch(user->type) {
 		case ACCOUNT_TYPE_MSA:
-			user->data = g_new0(struct MicrosoftUser, 1);
-			struct MicrosoftUser *userdata = user->data;
+			userdata = g_new0(struct MicrosoftUser, 1);
 			userdata->access_token = g_strdup(json_get_string(data, "access_token"));
 			userdata->refresh_token = g_strdup(json_get_string(data, "refresh_token"));
 			userdata->mc_access_token = g_strdup(json_get_string(data, "minecraft_access_token"));
 			userdata->valid_until = json_get_int(data, "valid_until");
+			microlauncher_account_set_userdata(user, userdata);
 			break;
 		case ACCOUNT_TYPE_OFFLINE:
-			user->data = NULL;
+			microlauncher_account_set_userdata(user, NULL);
 			break;
 	}
+	return user;
 }
 
-void microlauncher_save_account(json_object *obj, struct User *user) {
+void microlauncher_save_account(json_object *obj, MicrolauncherAccount *user) {
 	json_set_string(obj, "name", user->name);
 	json_set_string(obj, "uuid", user->uuid);
 	json_set_int(obj, "type", user->type);
@@ -141,7 +141,7 @@ static void load_list(json_object *arr, GSList **list) {
 	}
 }
 
-void microlauncher_load_instance(json_object *obj, struct Instance *instance) {
+void microlauncher_load_instance(json_object *obj, MicrolauncherInstance *instance) {
 	instance->name = g_strdup(json_get_string(obj, "name"));
 	instance->javaLocation = g_strdup(json_get_string(obj, "javaLocation"));
 	instance->location = g_strdup(json_get_string(obj, "location"));
@@ -151,7 +151,7 @@ void microlauncher_load_instance(json_object *obj, struct Instance *instance) {
 	load_list(json_object_object_get(obj, "jvmArgs"), &instance->jvmArgs);
 }
 
-void microlauncher_save_instance(json_object *obj, struct Instance *instance) {
+void microlauncher_save_instance(json_object *obj, MicrolauncherInstance *instance) {
 	json_set_string(obj, "name", instance->name);
 	json_set_string(obj, "javaLocation", instance->javaLocation);
 	json_set_string(obj, "location", instance->location);
@@ -175,7 +175,7 @@ bool microlauncher_init_config(void) {
 
 		for(size_t i = 0; i < length; i++) {
 			iter = json_object_array_get_idx(arr, i);
-			struct Instance *instance = g_new(struct Instance, 1);
+			MicrolauncherInstance *instance = microlauncher_instance_new();
 			microlauncher_load_instance(iter, instance);
 			instances = g_slist_append(instances, instance);
 		}
@@ -189,8 +189,7 @@ bool microlauncher_init_config(void) {
 
 		for(size_t i = 0; i < length; i++) {
 			iter = json_object_array_get_idx(arr, i);
-			struct User *user = g_new(struct User, 1);
-			microlauncher_load_account(iter, user);
+			MicrolauncherAccount *user = microlauncher_load_account(iter);
 			accounts = g_slist_append(accounts, user);
 		}
 	}
@@ -515,7 +514,8 @@ json_object *inherit_json(const char *versions_path, const char *id) {
 	snprintf(path, PATH_MAX, "%s/%s/%s.json", versions_path, id, id);
 	struct Version *version = g_hash_table_lookup(manifest, id);
 	// TODO let the user decide whenever to keep changes to local JSON or update with manifest one.
-	if(version) {
+	GFile *file = g_file_new_for_path(path);
+	if(version && g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) != G_FILE_TYPE_REGULAR) {
 		microlauncher_fetch_artifact(version->url, path, NULL, version->sha1, 0, 0, NULL);
 	}
 	json_object *thisObj = json_from_file(path);
@@ -759,14 +759,6 @@ char *microlauncher_get_javacp(json_object *json, const char *versions_path, con
 	return str.data;
 }
 
-static const char *ACCOUNT_TYPES[] = {
-	"Offline",
-	"Microsoft"};
-
-const char *microlauncher_get_account_type_name(enum AccountType accountType) {
-	return ACCOUNT_TYPES[accountType];
-}
-
 struct Settings *microlauncher_get_settings(void) {
 	return &settings;
 }
@@ -781,6 +773,10 @@ void microlauncher_load_settings(void) {
 	settings.demo = json_get_bool(obj, "demo");
 	settings.width = json_get_int(obj, "width");
 	settings.height = json_get_int(obj, "height");
+	settings.gpu_id = g_strdup(getenv("DRI_PRIME"));
+	if(!settings.gpu_id) {
+		settings.gpu_id = g_strdup(json_get_string(obj, "gpu"));
+	}
 	const char *root = getenv("MICROLAUNCHER_LAUNCHER_ROOT");
 	if(root) {
 		settings.launcher_root = g_strdup(root);
@@ -816,6 +812,7 @@ void microlauncher_save_settings(void) {
 	if(settings.launcher_root) {
 		json_set_string(obj, "launcherRoot", settings.launcher_root);
 	}
+	json_set_string(obj, "gpu", settings.gpu_id);
 
 	snprintf(pathbuf, PATH_MAX, "%s/microlauncher/settings.json", XDG_DATA_HOME);
 	json_to_file(obj, pathbuf, JSON_C_TO_STRING_NOSLASHESCAPE | JSON_C_TO_STRING_PRETTY);
@@ -826,7 +823,7 @@ void microlauncher_save_settings(void) {
 	while(iter) {
 		objIter = json_object_new_object();
 		json_object_array_add(obj, objIter);
-		struct User *user = iter->data;
+		MicrolauncherAccount *user = iter->data;
 		microlauncher_save_account(objIter, user);
 		iter = iter->next;
 	}
@@ -839,7 +836,7 @@ void microlauncher_save_settings(void) {
 	while(iter) {
 		objIter = json_object_new_object();
 		json_object_array_add(obj, objIter);
-		struct Instance *instance = iter->data;
+		MicrolauncherInstance *instance = iter->data;
 		microlauncher_save_instance(objIter, instance);
 		iter = iter->next;
 	}
@@ -848,61 +845,6 @@ void microlauncher_save_settings(void) {
 	json_object_put(obj);
 }
 
-bool microlauncher_auth_user(struct User *user, GCancellable *cancellable) {
-	run_callback(stage_update, "Authentication");
-	int steps, i;
-	i = 1;
-	const char *errorMessage;
-	char *tmpError = NULL;
-	switch(user->type) {
-		case ACCOUNT_TYPE_OFFLINE:
-			user->accessToken = "-";
-			user->uuid = random_uuid();
-			break;
-		case ACCOUNT_TYPE_MSA:
-			steps = 5;
-			struct MicrosoftUser *msuser = user->data;
-			run_callback(progress_update, (double)i++ / steps, "Checking access token");
-			if(microlauncher_msa_refresh_token(msuser->refresh_token, msuser) != 0 || (cancellable && g_cancellable_is_cancelled(cancellable))) {
-				errorMessage = "Failed check access token";
-				goto cancel;
-			}
-			run_callback(progress_update, (double)i++ / steps, "Authenticating via Xbox");
-			if(!microlauncher_msa_xboxlive_auth(msuser) || (cancellable && g_cancellable_is_cancelled(cancellable))) {
-				errorMessage = "Could not authenticate with Xbox Live";
-				goto cancel;
-			}
-			run_callback(progress_update, (double)i++ / steps, "Obtaining XSTS token");
-			if(!microlauncher_msa_xboxlive_xsts(msuser, &tmpError) || (cancellable && g_cancellable_is_cancelled(cancellable))) {
-				errorMessage = tmpError;
-				goto cancel;
-			}
-			run_callback(progress_update, (double)i++ / steps, "Getting access token");
-			if(!microlauncher_msa_login(msuser, &tmpError) || (cancellable && g_cancellable_is_cancelled(cancellable))) {
-				errorMessage = tmpError ? tmpError : "Failed to get access token";
-				goto cancel;
-			}
-			run_callback(progress_update, (double)i++ / steps, "Getting profile");
-			struct MinecraftProfile profile = microlauncher_msa_get_profile(msuser->mc_access_token);
-			if(!profile.username || (cancellable && g_cancellable_is_cancelled(cancellable))) {
-				errorMessage = "Could not get Minecraft profile";
-				goto cancel;
-			}
-			user->name = profile.username;
-			user->uuid = profile.uuid;
-			user->accessToken = msuser->mc_access_token;
-			break;
-	}
-	run_callback(stage_update, NULL);
-	return true;
-cancel:
-	run_callback(stage_update, NULL);
-	if(!g_cancellable_is_cancelled(cancellable)) {
-		run_callback(show_error, errorMessage);
-	}
-	free(tmpError);
-	return false;
-}
 
 static char *apply_replaces(const char *const *replaces, const char *str) {
 	int i = 0;
@@ -939,7 +881,11 @@ static int add_arguments(json_object *array, const char *const *replaces, GSList
 	return j;
 }
 
-bool microlauncher_launch_instance(const struct Instance *instance, struct User *user, GCancellable *cancellable) {
+bool microlauncher_auth_user(MicrolauncherAccount *user, GCancellable *cancellable) {
+	return microlauncher_account_auth_user(callbacks, user, cancellable);
+}
+
+bool microlauncher_launch_instance(const MicrolauncherInstance *instance, MicrolauncherAccount *user, GCancellable *cancellable) {
 	if(!instance || !user) {
 		return false;
 	}
@@ -993,12 +939,14 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	json_object *obj = json_object_object_get(json, "arguments");
 	json_object *argumentsGame = json_object_object_get(obj, "game");
 	json_object *argumentsJvm = json_object_object_get(obj, "jvm");
-	int n = 1;
-	n += user->accessToken ? strlen(user->accessToken) : 0;
-	n += user->uuid ? strlen(user->uuid) : 0;
-	n += strlen("token::");
-	char auth_session[n];
-	snprintf(auth_session, sizeof(auth_session), "token:%s:%s", user->accessToken ? user->accessToken : "", user->uuid ? user->uuid : "");
+	GValue val = G_VALUE_INIT;
+	g_value_init(&val, G_TYPE_STRING);
+	g_object_get_property(G_OBJECT(user), "access-token", &val);
+	const char *auth_token = g_value_get_string(&val);
+	g_object_get_property(G_OBJECT(user), "uuid", &val);
+	const char *valstr = g_value_get_string(&val);
+	char *auth_session = g_strdup_printf("token:%s:%s", auth_token ? auth_token : "", valstr ? valstr : "");
+	malloc_strs[m++] = auth_session;
 	char width_str[11];
 	snprintf(width_str, sizeof(width_str), "%d", settings.width);
 	char height_str[11];
@@ -1007,14 +955,14 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	const char *replaces[] = {
 		"${auth_player_name}", user->name,
 		"${auth_session}", auth_session,
-		"${auth_uuid}", user->uuid,
+		"${auth_uuid}", valstr,
 		"${auth_xuid}", "0",
 		"${clientid}", "-",
 		"${version_name}", id,
 		"${game_directory}", instance->location,
 		"${assets_root}", assets_dir,
 		"${assets_index_name}", json_get_string(json, "assets"),
-		"${auth_access_token}", user->accessToken,
+		"${auth_access_token}", auth_token,
 		"${user_properties}", "{}",
 		"${user_type}", user->type == ACCOUNT_TYPE_MSA ? "msa" : "legacy",
 		"${version_type}", json_get_string(json, "type"),
@@ -1042,9 +990,6 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 	char *argv[256];
 	argv[c++] = instance->javaLocation ? instance->javaLocation : "java"; /* Try java from path unless explicitly set */
 // JVM args
-#ifdef __linux
-	argv[c++] = "-Dorg.lwjgl.glfw.libname=/usr/lib/libglfw.so";
-#endif
 	if(json_object_is_type(argumentsJvm, json_type_array)) {
 		int k = add_arguments(argumentsJvm, replaces, features, argv + c, malloc_strs + m);
 		c += k;
@@ -1054,6 +999,13 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 		argv[c++] = path;
 		argv[c++] = "-cp";
 		argv[c++] = cp;
+	}
+	if(instance->jvmArgs) {
+		GSList *node = instance->jvmArgs;
+		while(node) {
+			argv[c++] = node->data;
+			node = node->next;
+		}
 	}
 	argv[c++] = (char *)main_class;
 
@@ -1088,11 +1040,21 @@ bool microlauncher_launch_instance(const struct Instance *instance, struct User 
 			argv[c++] = "--demo";
 		}
 	}
+	if(instance->extraGameArgs) {
+		GSList *node = instance->extraGameArgs;
+		while(node) {
+			argv[c++] = node->data;
+			node = node->next;
+		}
+	}
 	argv[c] = NULL;
 
 	ret = true;
 	for(int i = 0; i < c; i++) {
 		g_print("%s\n", argv[i]);
+	}
+	if(settings.gpu_id) {
+		setenv("DRI_PRIME", settings.gpu_id, true);
 	}
 	GPid pid = util_fork_execv(instance->location, argv);
 
@@ -1142,7 +1104,7 @@ int main(int argc, char **argv) {
 
 	GSList *instances = *microlauncher_get_instances();
 	GSList *accounts = *microlauncher_get_accounts();
-	struct User *user;
+	MicrolauncherAccount *user;
 	if(use_saved_user) {
 		user = settings.user;
 	} else {

@@ -22,5 +22,5 @@ pacman -Sy mingw-w64-x86_64-gtk4 mingw-w64-x86_64-glib2 mingw-w64-x86_64-json-c 
 ## TODO
 
 ### GUI:
-- Use GObject for instance and account rows.
 - Figure out why right click context menu doesn't get fully destroyed?
+- Other memory management fixes

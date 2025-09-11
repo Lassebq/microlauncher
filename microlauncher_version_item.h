@@ -4,13 +4,6 @@
 
 G_BEGIN_DECLS
 
-enum {
-	PROP_VERSION_LABEL = 1,
-	PROP_VERSION_TYPE,
-	PROP_RELEASE_TIME,
-	N_PROPERTIES
-};
-
 struct _VersionItem {
 	GObject parent_instance;
 	char *version;

@@ -1,10 +1,12 @@
 #pragma once
 
-#include "gio/gio.h"
+#include <gio/gio.h>
 #include "glib.h"
 #include <curl/curl.h>
 #include <json_types.h>
 #include <stdbool.h>
+#include "microlauncher_instance.h"
+#include "microlauncher_account.h"
 
 #define MOJANG_MANIFEST "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
 #define BETTERJSONS_MANIFEST "https://mcphackers.org/BetterJSONs/version_manifest_v2.json"
@@ -17,68 +19,27 @@
 
 extern char *EXEC_BINARY;
 
-struct Callbacks {
-	void (*instance_started)(GPid pid, void *userdata);
-	void (*instance_finished)(void *userdata);
-	void (*progress_update)(double precentage, const char *progress_msg, void *userdata);
-	void (*stage_update)(const char *progress_msg, void *userdata);
-	void (*show_error)(const char *error_message, void *userdata);
-	void *userdata;
-};
-
-struct Version {
-	char *id;
-	char *type;
-	char *releaseTime;
-	char *url;
-	char *sha1;
-};
-
-enum AccountType {
-	ACCOUNT_TYPE_OFFLINE = 0,
-	ACCOUNT_TYPE_MSA = 1
-};
-
-struct User {
-	char *name;
-	char *uuid;
-	char *accessToken;
-	char *id;
-	enum AccountType type;
-	void *data;
-};
-
-struct Instance {
-	char *name;
-	char *location;
-	char *version;
-	char *icon;
-	char *javaLocation;
-	GSList *extraGameArgs;
-	GSList *jvmArgs;
-};
-
 struct Settings {
-	struct User *user;
-	struct Instance *instance;
+	MicrolauncherAccount *user;
+	MicrolauncherInstance *instance;
 	int width;
 	int height;
 	bool fullscreen;
 	bool demo;
 	char *launcher_root;
 	char *manifest_url;
+	char *gpu_id;
 };
 
-struct Instance *microlauncher_instance_get(GSList *list, const char *id);
-struct User *microlauncher_account_get(GSList *list, const char *id);
-bool microlauncher_launch_instance(const struct Instance *instance, struct User *user, GCancellable *cancellable);
+MicrolauncherInstance *microlauncher_instance_get(GSList *list, const char *id);
+MicrolauncherAccount *microlauncher_account_get(GSList *list, const char *id);
+bool microlauncher_launch_instance(const MicrolauncherInstance *instance, MicrolauncherAccount *user, GCancellable *cancellable);
 void microlauncher_save_settings(void);
 void microlauncher_load_settings(void);
 struct Settings *microlauncher_get_settings(void);
 GSList **microlauncher_get_instances(void);
 GSList **microlauncher_get_accounts(void);
 void microlauncher_set_callbacks(struct Callbacks callbacks);
-const char *microlauncher_get_account_type_name(enum AccountType accountType);
+bool microlauncher_auth_user(MicrolauncherAccount *user, GCancellable *cancellable);
 json_object *microlauncher_http_get_json(const char *url, struct curl_slist *headers, const char *post);
-bool microlauncher_auth_user(struct User *user, GCancellable *cancellable);
 GHashTable *microlauncher_get_manifest(void);

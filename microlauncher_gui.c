@@ -1,10 +1,10 @@
-#include "gdk/gdk.h"
-#include "glib-object.h"
 #include "gtk_util.h"
 #include "json_object.h"
 #include "json_types.h"
 #include "json_util.h"
 #include "microlauncher.h"
+#include "microlauncher_instance.h"
+#include "microlauncher_account.h"
 #include "microlauncher_msa.h"
 #include "microlauncher_version_item.h"
 #include "util.h"
@@ -13,11 +13,12 @@
 #include <glib.h>
 #include <gtk/gtk.h>
 #include <stdatomic.h>
-#ifdef __linux
-#include <linux/limits.h>
-#elif _WIN32
+#ifdef _WIN32
 #include "shlobj.h"
 #include "windows.h"
+#endif
+#ifdef __unix
+#include <pci/pci.h>
 #endif
 #include <math.h>
 #include <signal.h>
@@ -46,10 +47,11 @@ static GtkEntry *heightEntry;
 static GtkRevealer *revealer;
 
 static GtkWidget *accountsPage;
-static GtkStringList *accountsList;
+static GListStore *accountsList;
 static GtkWidget *instancesPage;
-static GtkStringList *instancesList;
+static GListStore *instancesList;
 static GtkListView *instancesView;
+static GtkListView *accountsView;
 
 static GtkLabel *msaCodeLabel;
 static GtkLabel *msaHint;
@@ -60,42 +62,49 @@ static int msaSecondsLeft;
 static GPid instancePid = 0;
 static GCancellable *instanceCancellable;
 
+static GSList *gpuIds;
+static GtkStringList *gpuLabels;
+
 static struct Settings *settings;
 
 static void microlauncher_gui_refresh_instance(void);
 
-static void remove_account(struct User *account) {
+static void remove_account(MicrolauncherAccount *account) {
 	GSList **accounts = microlauncher_get_accounts();
-	gtk_string_list_remove(accountsList, gtk_string_list_find(accountsList, account->id));
+	guint index = G_MAXUINT;
+	g_list_store_find(accountsList, account, &index);
+	g_list_store_remove(accountsList, index);
 	*accounts = g_slist_remove(*accounts, account);
 	if(settings->user == account) {
 		settings->user = NULL;
 	}
-	free(account);
+	g_object_unref(account);
 	microlauncher_gui_refresh_instance();
 }
 
-static void remove_instance(struct Instance *instance) {
+static void remove_instance(MicrolauncherInstance *instance) {
 	GSList **instances = microlauncher_get_instances();
-	gtk_string_list_remove(instancesList, gtk_string_list_find(instancesList, instance->name));
+	guint index = G_MAXUINT;
+	g_list_store_find(instancesList, instance, &index);
+	g_list_store_remove(instancesList, index);
 	*instances = g_slist_remove(*instances, instance);
 	if(settings->instance == instance) {
 		settings->instance = NULL;
 	}
-	free(instance);
+	g_object_unref(instance);
 	microlauncher_gui_refresh_instance();
 }
 
-static void add_instance(struct Instance *instance) {
+static void add_instance(MicrolauncherInstance *instance) {
 	GSList **instances = microlauncher_get_instances();
 	*instances = g_slist_append(*instances, instance);
-	gtk_string_list_append(instancesList, instance->name);
+	g_list_store_append(instancesList, instance);
 }
 
-static void add_account(struct User *user) {
+static void add_account(MicrolauncherAccount *user) {
 	GSList **accounts = microlauncher_get_accounts();
 	*accounts = g_slist_append(*accounts, user);
-	gtk_string_list_append(accountsList, user->id);
+	g_list_store_append(accountsList, user);
 }
 
 static void browse_directory_click(GtkButton *button, const gpointer p) {
@@ -188,31 +197,59 @@ struct CreateInstance {
 	GtkEntry *instanceDir;
 	GtkEntry *instanceJvm;
 	GtkImage *instanceIcon;
+	GtkEntry *instanceGameArgs;
+	GtkEntry *instanceJvmArgs;
 	GtkColumnView *versionView;
 	GtkWindow *dialog;
-	struct Instance *toReplace;
+	MicrolauncherInstance *toReplace;
 };
 
 static void create_or_modify_instance(GtkButton *button, void *userdata) {
 	struct CreateInstance *createInstance = (struct CreateInstance *)userdata;
-	struct Instance *inst = g_new0(struct Instance, 1);
-	inst->name = g_strdup(gtk_entry_get_text(createInstance->instanceName));
-	inst->location = g_strdup(gtk_entry_get_text(createInstance->instanceDir));
-	inst->javaLocation = g_strdup(gtk_entry_get_text(createInstance->instanceJvm));
-	inst->icon = g_strdup(g_object_get_data(G_OBJECT(createInstance->instanceIcon), "icon-location"));
+	GValue strVal = G_VALUE_INIT;
+	g_value_init(&strVal, G_TYPE_STRING);
+
+	MicrolauncherInstance *inst = createInstance->toReplace ? createInstance->toReplace : microlauncher_instance_new();
+
+	g_value_set_string(&strVal, gtk_entry_get_text(createInstance->instanceName));
+	g_object_set_property(G_OBJECT(inst), "name", &strVal);
+
+	g_value_set_string(&strVal, gtk_entry_get_text(createInstance->instanceDir));
+	g_object_set_property(G_OBJECT(inst), "location", &strVal);
+
+	g_value_set_string(&strVal, gtk_entry_get_text(createInstance->instanceJvm));
+	g_object_set_property(G_OBJECT(inst), "java-location", &strVal);
+
+	g_value_set_string(&strVal, g_object_get_data(G_OBJECT(createInstance->instanceIcon), "icon-location"));
+	g_object_set_property(G_OBJECT(inst), "icon", &strVal);
+
+	inst->extraGameArgs = NULL;
+	inst->jvmArgs = NULL;
+	char *str = g_strdup(gtk_entry_get_text(createInstance->instanceGameArgs));
+	char **args = get_commandv(str);
+	int i = 0;
+	while(args && args[i]) {
+		inst->extraGameArgs = g_slist_append(inst->extraGameArgs, g_strdup(args[i]));
+		i++;
+	}
+	free(str);
+	free(args);
+	i = 0;
+	str = g_strdup(gtk_entry_get_text(createInstance->instanceJvmArgs));
+	args = get_commandv(str);
+	while(args && args[i]) {
+		inst->jvmArgs = g_slist_append(inst->jvmArgs, g_strdup(args[i]));
+		i++;
+	}
+	free(str);
+	free(args);
+
 	GtkSingleSelection *selection = GTK_SINGLE_SELECTION(gtk_column_view_get_model(createInstance->versionView));
 	VersionItem *item = gtk_single_selection_get_selected_item(selection);
-	inst->version = g_strdup(item->version);
-	bool wasActiveInstance = settings->instance == createInstance->toReplace;
-	if(createInstance->toReplace) {
-		remove_instance(createInstance->toReplace);
-	}
-	add_instance(inst);
-	if(wasActiveInstance || createInstance->toReplace == NULL) {
-		settings->instance = inst;
-		GtkSingleSelection *selection = GTK_SINGLE_SELECTION(gtk_list_view_get_model(instancesView));
-		guint index = gtk_string_list_find(instancesList, inst->name);
-		gtk_single_selection_set_selected(selection, index);
+	g_value_set_string(&strVal, item->version);
+	g_object_set_property(G_OBJECT(inst), "version", &strVal);
+	if(!createInstance->toReplace) {
+		add_instance(inst);
 	}
 	microlauncher_gui_refresh_instance();
 	gtk_window_destroy(createInstance->dialog);
@@ -236,6 +273,18 @@ struct ModifyInstanceName {
 	GtkWidget *createButton;
 };
 
+const MicrolauncherInstance *get_instance_by_name(const char *name) {
+	GSList *node = *microlauncher_get_instances();
+	while(node) {
+		MicrolauncherInstance *inst = node->data;
+		if(strequal(inst->name, name)) {
+			return node->data;
+		}
+		node = node->next;
+	}
+	return NULL;
+}
+
 void instance_name_changed(GtkEntry *self, gpointer user_data) {
 	struct ModifyInstanceName instName = *(struct ModifyInstanceName *)user_data;
 	const char *text = gtk_entry_get_text(self);
@@ -243,7 +292,7 @@ void instance_name_changed(GtkEntry *self, gpointer user_data) {
 		gtk_widget_add_css_class(GTK_WIDGET(self), "error");
 		gtk_widget_set_tooltip_text(GTK_WIDGET(self), "Name cannot be empty");
 		gtk_widget_set_sensitive(instName.createButton, false);
-	} else if(gtk_string_list_find(instancesList, text) != G_MAXUINT && !strequal(instName.instanceName, text)) {
+	} else if(get_instance_by_name(text) && !strequal(instName.instanceName, text)) {
 		gtk_widget_add_css_class(GTK_WIDGET(self), "error");
 		gtk_widget_set_tooltip_text(GTK_WIDGET(self), "Instance name conflicts with existing instance");
 		gtk_widget_set_sensitive(instName.createButton, false);
@@ -254,12 +303,13 @@ void instance_name_changed(GtkEntry *self, gpointer user_data) {
 	}
 }
 
-static void microlauncher_modify_instance_window(GtkButton *button, struct Instance *instance) {
+static void microlauncher_modify_instance_window(GtkButton *button, MicrolauncherInstance *instance) {
 	GtkWidget *widget;
 	GtkScrolledWindow *scrolledWindow;
 	GtkBox *box;
 	GtkGrid *grid;
 	GtkEntry *entry;
+	int row = 0;
 	struct CreateInstance *createInstance = g_new(struct CreateInstance, 1);
 	GtkWindow *newWindow = gtk_modal_dialog_new(window);
 	createInstance->toReplace = instance;
@@ -290,11 +340,11 @@ static void microlauncher_modify_instance_window(GtkButton *button, struct Insta
 	GtkGesture *controller = gtk_gesture_click_new();
 	g_signal_connect(controller, "released", G_CALLBACK(icon_released), widget);
 	gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(controller));
-	gtk_grid_attach(grid, widget, 0, 0, 1, 2);
+	gtk_grid_attach(grid, widget, 0, row, 1, 2);
 
 	widget = gtk_label_new("Instance name:");
 	gtk_widget_set_halign(widget, GTK_ALIGN_START);
-	gtk_grid_attach(grid, widget, 1, 0, 1, 1);
+	gtk_grid_attach(grid, widget, 1, row, 1, 1);
 
 	widget = gtk_entry_new();
 	if(instance) {
@@ -303,12 +353,12 @@ static void microlauncher_modify_instance_window(GtkButton *button, struct Insta
 	struct ModifyInstanceName *instName = g_new(struct ModifyInstanceName, 1);
 	instName->instanceName = instance ? instance->name : NULL;
 	g_signal_connect_data(widget, "changed", G_CALLBACK(instance_name_changed), instName, (GClosureNotify)g_free, 0);
-	gtk_grid_attach(grid, widget, 2, 0, 1, 1);
+	gtk_grid_attach(grid, widget, 2, row++, 1, 1);
 	createInstance->instanceName = GTK_ENTRY(widget);
 
 	widget = gtk_label_new("Game directory:");
 	gtk_widget_set_halign(widget, GTK_ALIGN_START);
-	gtk_grid_attach(grid, widget, 1, 1, 1, 1);
+	gtk_grid_attach(grid, widget, 1, row, 1, 1);
 
 	widget = gtk_entry_new();
 	entry = GTK_ENTRY(widget);
@@ -322,11 +372,11 @@ static void microlauncher_modify_instance_window(GtkButton *button, struct Insta
 	widget = gtk_button_new_with_label("Select");
 	g_signal_connect(widget, "clicked", G_CALLBACK(select_instance_dir_event), entry);
 	gtk_box_append(container, widget);
-	gtk_grid_attach(grid, GTK_WIDGET(container), 2, 1, 1, 1);
+	gtk_grid_attach(grid, GTK_WIDGET(container), 2, row++, 1, 1);
 
 	widget = gtk_label_new("Java executable:");
 	gtk_widget_set_halign(widget, GTK_ALIGN_START);
-	gtk_grid_attach(grid, widget, 1, 2, 1, 1);
+	gtk_grid_attach(grid, widget, 1, row, 1, 1);
 
 	widget = gtk_entry_new();
 	entry = GTK_ENTRY(widget);
@@ -340,7 +390,52 @@ static void microlauncher_modify_instance_window(GtkButton *button, struct Insta
 	widget = gtk_button_new_with_label("Select");
 	g_signal_connect(widget, "clicked", G_CALLBACK(select_instance_java_event), entry);
 	gtk_box_append(container, widget);
-	gtk_grid_attach(grid, GTK_WIDGET(container), 2, 2, 1, 1);
+	gtk_grid_attach(grid, GTK_WIDGET(container), 2, row++, 1, 1);
+
+	widget = gtk_label_new("Game arguments:");
+	gtk_widget_set_halign(widget, GTK_ALIGN_START);
+	gtk_grid_attach(grid, widget, 1, row, 1, 1);
+
+	widget = gtk_entry_new();
+	entry = GTK_ENTRY(widget);
+	createInstance->instanceGameArgs = entry;
+	if(instance) {
+		String str = string_new(NULL);
+		GSList *node = instance->extraGameArgs;
+		while(node) {
+			string_append(&str, node->data);
+			if(node->next) {
+				string_append_char(&str, ' ');
+			}
+			node = node->next;
+		}
+		gtk_entry_set_text(entry, str.data);
+		string_destroy(&str);
+	}
+	gtk_grid_attach(grid, widget, 2, row++, 1, 1);
+
+	widget = gtk_label_new("JVM arguments:");
+	gtk_widget_set_halign(widget, GTK_ALIGN_START);
+	gtk_grid_attach(grid, widget, 1, row, 1, 1);
+
+	widget = gtk_entry_new();
+	entry = GTK_ENTRY(widget);
+	createInstance->instanceJvmArgs = entry;
+	if(instance) {
+		String str = string_new(NULL);
+		GSList *node = instance->jvmArgs;
+		while(node) {
+			string_append(&str, node->data);
+			if(node->next) {
+				string_append_char(&str, ' ');
+			}
+			node = node->next;
+		}
+		gtk_entry_set_text(entry, str.data);
+		string_destroy(&str);
+	}
+	gtk_grid_attach(grid, widget, 2, row++, 1, 1);
+
 	widget = gtk_label_new("Select version:");
 	gtk_widget_set_halign(widget, GTK_ALIGN_START);
 	gtk_box_append(box, widget);
@@ -462,6 +557,7 @@ static void microlauncher_gui_refresh_instance(void) {
 		}
 
 		widget = gtk_label_new(settings->instance->name);
+		gtk_label_set_ellipsize(GTK_LABEL(widget), PANGO_ELLIPSIZE_END);
 		gtk_widget_add_css_class(widget, "title-1");
 		gtk_label_set_xalign(GTK_LABEL(widget), 0.0F);
 		gtk_widget_set_hexpand(widget, true);
@@ -469,6 +565,7 @@ static void microlauncher_gui_refresh_instance(void) {
 
 		label = g_strdup_printf("Version %s", settings->instance->version);
 		widget = gtk_label_new(label);
+		gtk_label_set_ellipsize(GTK_LABEL(widget), PANGO_ELLIPSIZE_END);
 		free(label);
 		gtk_label_set_xalign(GTK_LABEL(widget), 0.0F);
 		gtk_widget_set_hexpand(widget, true);
@@ -589,6 +686,11 @@ static void clicked_play(void) {
 	g_task_run_in_thread(task, launch_instance_thread);
 }
 
+static void notify_gpu_change(GtkDropDown *dropDown, GParamSpec *pspec, GSList *gpuList) {
+	free(settings->gpu_id);
+	settings->gpu_id = g_strdup(g_slist_nth_data(gpuList, gtk_drop_down_get_selected(dropDown)));
+}
+
 static GtkWidget *microlauncher_gui_page_launcher(void) {
 	GtkWidget *widget, *box, *boxOuter, *scrolledWindow, *frame;
 	GtkGrid *grid;
@@ -654,6 +756,18 @@ static GtkWidget *microlauncher_gui_page_launcher(void) {
 	gtk_widget_set_hexpand(widget, false);
 	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
 
+#ifdef __unix
+	widget = gtk_drop_down_simple_new(gpuLabels, NULL);
+	g_signal_connect(widget, "notify::selected", G_CALLBACK(notify_gpu_change), gpuIds);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(widget), 0);
+	GSList *node;
+	if(settings->gpu_id && (node = g_slist_find_custom(gpuIds, settings->gpu_id, (GCompareFunc)g_strcmp0))) {
+		gtk_drop_down_set_selected(GTK_DROP_DOWN(widget), g_slist_index(gpuIds, node->data));
+	}
+	widget = gtk_widget_with_label("Preferred GPU:", widget);
+	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
+#endif
+
 	gtk_box_append(GTK_BOX(box), frame);
 
 	widget = gtk_button_new_with_label("Play");
@@ -686,18 +800,6 @@ static void show_row_menu(GtkGestureClick *gesture, gint n_press, gdouble x, gdo
 static void instance_list_view_setup_factory(GtkListItemFactory *factory, GtkListItem *list_item, gpointer user_data) {
 	GtkWidget *widget;
 	widget = gtk_grid_new();
-	GtkGesture *click = gtk_gesture_click_new();
-	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_SECONDARY);
-	GMenu *menu = g_menu_new();
-	g_menu_append(menu, "Edit", "instance.edit");
-#ifdef _WIN32
-	g_menu_append(menu, "Create shortcut", "instance.create-launcher");
-#else
-	g_menu_append(menu, "Create launcher", "instance.create-launcher");
-#endif
-	g_menu_append(menu, "Delete", "instance.delete");
-	g_signal_connect(click, "pressed", G_CALLBACK(show_row_menu), menu);
-	gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(click));
 	gtk_widget_set_hexpand(widget, true);
 	GtkGrid *grid = GTK_GRID(widget);
 	struct InstanceRowWidgets *rw = g_new0(struct InstanceRowWidgets, 1);
@@ -718,6 +820,7 @@ static void instance_list_view_setup_factory(GtkListItemFactory *factory, GtkLis
 
 	widget = gtk_label_new(NULL);
 	rw->locationLabel = GTK_LABEL(widget);
+	gtk_label_set_ellipsize(GTK_LABEL(widget), PANGO_ELLIPSIZE_START);
 	gtk_widget_set_halign(widget, GTK_ALIGN_END);
 	gtk_widget_set_vexpand(widget, true);
 	gtk_widget_add_css_class(widget, "subtitle");
@@ -733,7 +836,7 @@ static void instance_list_view_setup_factory(GtkListItemFactory *factory, GtkLis
 	g_object_set_data_full(G_OBJECT(list_item), "row-widgets", rw, g_free);
 }
 
-static void microlauncher_create_launcher(struct Instance *inst) {
+static void microlauncher_create_launcher(MicrolauncherInstance *inst) {
 	char path[PATH_MAX];
 #ifndef _WIN32
 	snprintf(path, PATH_MAX, "%s/applications/microlauncher-%s.desktop", XDG_DATA_HOME, inst->name);
@@ -771,7 +874,7 @@ static void microlauncher_create_launcher(struct Instance *inst) {
 }
 
 static void instance_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant *parameter, gpointer *data) {
-	struct Instance *inst = (struct Instance *)data;
+	MicrolauncherInstance *inst = (MicrolauncherInstance *)data;
 	if(strcmp(g_action_get_name(G_ACTION(simple_action)), "edit") == 0) {
 		microlauncher_modify_instance_window(NULL, inst);
 	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "create-launcher") == 0) {
@@ -781,20 +884,18 @@ static void instance_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant
 	}
 }
 
-void reorder_list(GSList **list, void *(*data_get_func)(GSList *list, const char *key), GtkStringList *orderList) {
+void reorder_list(GSList **list, GListStore *orderList) {
 	GSList *newList = NULL;
 	for(guint i = 0; i < g_list_model_get_n_items(G_LIST_MODEL(orderList)); i++) {
-		newList = g_slist_append(newList, data_get_func(*list, gtk_string_list_get_string(orderList, i)));
+		newList = g_slist_append(newList, g_list_model_get_item(G_LIST_MODEL(orderList), i));
 	}
 	*list = newList;
 }
 
-typedef void *(*DataGetFunc)(GSList *list, const char *key);
-
 struct DropUserData {
 	GtkListItem *list_item;
 	GSList **list;
-	DataGetFunc data_get_func;
+	GtkSingleSelection *selection;
 };
 
 static gboolean on_drop(GtkDropTarget *target,
@@ -804,7 +905,7 @@ static gboolean on_drop(GtkDropTarget *target,
 					gpointer user_data) {
 	struct DropUserData *ondrop = user_data;
 	GtkListItem *list_item = GTK_LIST_ITEM(ondrop->list_item);
-	GtkStringList *store = g_object_get_data(G_OBJECT(list_item), "store");
+	GListStore *store = g_object_get_data(G_OBJECT(list_item), "store");
 	guint pos = gtk_list_item_get_position(list_item);
 	if(!G_VALUE_HOLDS(value, G_TYPE_POINTER)) {
 		return false;
@@ -812,13 +913,15 @@ static gboolean on_drop(GtkDropTarget *target,
 	GtkListItem *dropItem = g_value_get_pointer(value);
 
 	guint old_pos = gtk_list_item_get_position(dropItem);
+	gboolean wasSelected = gtk_list_item_get_selected(dropItem);
 
 	if(old_pos != G_MAXUINT && old_pos != pos) {
-		const char *oldstr = gtk_string_list_get_string(store, old_pos);
-		gtk_string_list_remove(store, old_pos);
-		const char *insert[] = { oldstr, NULL };
-		gtk_string_list_splice(store, pos, 0, insert);
-		reorder_list(ondrop->list, ondrop->data_get_func, store);
+		g_list_store_remove(store, old_pos);
+		g_list_store_insert(store, pos, gtk_list_item_get_item(dropItem));
+		reorder_list(ondrop->list, store);
+		if(wasSelected) {
+			gtk_single_selection_set_selected(ondrop->selection, pos);
+		}
 	}
 	return true;
 }
@@ -841,23 +944,42 @@ static void on_drag_begin(GtkDragSource *source,
 	int width = gtk_widget_get_width(self);
 	int height = gtk_widget_get_height(self);
 
-	// Snapshot for drawing
 	GtkSnapshot *snapshot = gtk_snapshot_new();
 
 	gdk_paintable_snapshot(paintable, snapshot, width, height);
 
-	// Convert to texture
 	paintable = gtk_snapshot_free_to_paintable(snapshot, NULL);
 	gtk_drag_source_set_icon(source, paintable, point.x, point.y);
 	g_object_unref(paintable);
 }
 
+static void update_icon(GObject* self, GParamSpec* pspec, gpointer user_data) {
+	GValue value = G_VALUE_INIT;
+	g_value_init(&value, pspec->value_type);
+	g_object_get_property(self, pspec->name, &value);
+	if(G_VALUE_HOLDS(&value, G_TYPE_STRING)) {
+		gtk_image_set_from_file(GTK_IMAGE(user_data), g_value_get_string(&value));
+	}
+}
+
 static void instance_list_view_bind_factory(GtkListItemFactory *factory, GtkListItem *list_item, gpointer user_data) {
 	struct InstanceRowWidgets *rw = g_object_get_data(G_OBJECT(list_item), "row-widgets");
+	GtkWidget *parent = gtk_widget_get_parent(rw->grid);
 
-	const char *str = gtk_string_object_get_string(GTK_STRING_OBJECT(gtk_list_item_get_item(list_item)));
-	GSList *list = *microlauncher_get_instances();
-	struct Instance *instance = microlauncher_instance_get(list, str);
+	GtkGesture *click = gtk_gesture_click_new();
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_SECONDARY);
+	GMenu *menu = g_menu_new();
+	g_menu_append(menu, "Edit", "instance.edit");
+#ifdef _WIN32
+	g_menu_append(menu, "Create shortcut", "instance.create-launcher");
+#else
+	g_menu_append(menu, "Create launcher", "instance.create-launcher");
+#endif
+	g_menu_append(menu, "Delete", "instance.delete");
+	g_signal_connect(click, "pressed", G_CALLBACK(show_row_menu), menu);
+	gtk_widget_add_controller(parent, GTK_EVENT_CONTROLLER(click));
+
+	MicrolauncherInstance *instance = gtk_list_item_get_item(list_item);
 	GSimpleActionGroup *actions = g_simple_action_group_new();
 	GSimpleAction *action;
 
@@ -869,7 +991,7 @@ static void instance_list_view_bind_factory(GtkListItemFactory *factory, GtkList
 		g_action_map_add_action(G_ACTION_MAP(actions), G_ACTION(action));
 		i++;
 	}
-	gtk_widget_insert_action_group(rw->grid, "instance", G_ACTION_GROUP(actions));
+	gtk_widget_insert_action_group(parent, "instance", G_ACTION_GROUP(actions));
 
 	GtkDragSource *drag_source = gtk_drag_source_new();
 	gtk_drag_source_set_actions(drag_source, GDK_ACTION_MOVE);
@@ -877,53 +999,46 @@ static void instance_list_view_bind_factory(GtkListItemFactory *factory, GtkList
 	g_signal_connect(drag_source, "prepare", G_CALLBACK(on_drag_prepare), list_item);
 	g_signal_connect(drag_source, "drag-begin", G_CALLBACK(on_drag_begin), rw->grid);
 
-	gtk_widget_add_controller(gtk_widget_get_parent(rw->grid), GTK_EVENT_CONTROLLER(drag_source));
+	gtk_widget_add_controller(parent, GTK_EVENT_CONTROLLER(drag_source));
 
 	g_object_set_data(G_OBJECT(list_item), "store", user_data);
 	GtkDropTarget *target = gtk_drop_target_new(G_TYPE_POINTER, GDK_ACTION_MOVE);
 	struct DropUserData *ondrop = g_new(struct DropUserData, 1);
 	ondrop->list_item = list_item;
 	ondrop->list = microlauncher_get_instances();
-	ondrop->data_get_func = (DataGetFunc)microlauncher_instance_get;
+	ondrop->selection = GTK_SINGLE_SELECTION(gtk_list_view_get_model(instancesView));
 	g_signal_connect_data(target, "drop", G_CALLBACK(on_drop), ondrop, (GClosureNotify)g_free, 0);
-	gtk_widget_add_controller(gtk_widget_get_parent(rw->grid), GTK_EVENT_CONTROLLER(target));
+	gtk_widget_add_controller(parent, GTK_EVENT_CONTROLLER(target));
 
+	g_signal_connect(instance, "notify::icon", G_CALLBACK(update_icon), rw->icon);
 	gtk_image_set_from_file(rw->icon, instance->icon);
+	g_object_bind_property(instance, "name", rw->instanceLabel, "label", G_BINDING_SYNC_CREATE);
 	gtk_label_set_label(rw->instanceLabel, instance->name);
-	char path[PATH_MAX];
-	int truncDir = MAX(0, (int)strlen(instance->location) - 40);
-	const char *c = instance->location + truncDir;
-	while(*c != '\0' && *c != '/') {
-		c++;
-	}
-	snprintf(path, PATH_MAX, (truncDir == 0) ? "%s" : "...%s", c);
-	gtk_label_set_label(rw->locationLabel, path);
+	g_object_bind_property(instance, "location", rw->locationLabel, "label", G_BINDING_SYNC_CREATE);
+	gtk_label_set_label(rw->locationLabel, instance->location);
+	g_object_bind_property(instance, "version", rw->versionLabel, "label", G_BINDING_SYNC_CREATE);
 	gtk_label_set_label(rw->versionLabel, instance->version);
 }
 
-static void instance_selection_changed(GtkSingleSelection *self, guint position, guint n_items, GtkStringList *user_data) {
-	GSList *instances = *microlauncher_get_instances();
-	settings->instance = microlauncher_instance_get(instances, gtk_string_list_get_string(user_data, gtk_single_selection_get_selected(self)));
+static void instance_selection_changed(GtkSingleSelection *self, guint position, guint n_items, GListStore *user_data) {
+	settings->instance = gtk_single_selection_get_selected_item(self);
 	microlauncher_gui_refresh_instance();
 }
 
-static void activate_instance_row(GtkListView *self, guint position, GtkStringList *user_data) {
-	GSList *instances = *microlauncher_get_instances();
-	settings->instance = microlauncher_instance_get(instances, gtk_string_list_get_string(user_data, position));
+static void activate_instance_row(GtkListView *self, guint position, GListStore *user_data) {
+	settings->instance = g_list_model_get_item(G_LIST_MODEL(user_data), position);
 	microlauncher_gui_refresh_instance();
 	microlauncher_gui_switch_to_tab(NULL, "launcher");
 	clicked_play();
 }
 
 static void account_selection_changed(GtkSingleSelection *self, guint position, guint n_items, GtkStringList *user_data) {
-	GSList *accounts = *microlauncher_get_accounts();
-	settings->user = microlauncher_account_get(accounts, gtk_string_list_get_string(user_data, gtk_single_selection_get_selected(self)));
+	settings->user = gtk_single_selection_get_selected_item(self);
 	microlauncher_gui_refresh_instance();
 }
 
 static void activate_account_row(GtkListView *self, guint position, GtkStringList *user_data) {
-	GSList *accounts = *microlauncher_get_accounts();
-	settings->user = microlauncher_account_get(accounts, gtk_string_list_get_string(user_data, position));
+	settings->user = g_list_model_get_item(G_LIST_MODEL(user_data), position);
 	microlauncher_gui_refresh_instance();
 	microlauncher_gui_switch_to_tab(NULL, "launcher");
 }
@@ -940,12 +1055,13 @@ static GtkWidget *microlauncher_gui_page_instances(void) {
 
 	box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
 	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolledWindow), box);
-	instancesList = gtk_string_list_new(NULL);
+	instancesList = g_list_store_new(G_TYPE_OBJECT);
 
-	GSList *list = *microlauncher_get_instances();
-	for(guint i = 0; i < g_slist_length(list); i++) {
-		const struct Instance *inst = g_slist_nth(list, i)->data;
-		gtk_string_list_append(instancesList, inst->name);
+	GSList *node = *microlauncher_get_instances();
+	while(node) {
+		MicrolauncherInstance *inst = node->data;
+		g_list_store_append(instancesList, inst);
+		node = node->next;
 	}
 
 	GtkSingleSelection *selection = gtk_single_selection_new(G_LIST_MODEL(instancesList));
@@ -959,9 +1075,11 @@ static GtkWidget *microlauncher_gui_page_instances(void) {
 	instancesView = GTK_LIST_VIEW(widget);
 	gtk_single_selection_set_selected(selection, GTK_INVALID_LIST_POSITION);
 	if(settings->instance) {
-		gtk_single_selection_set_selected(selection, gtk_string_list_find(instancesList, settings->instance->name));
+		guint pos = G_MAXUINT;
+		if(g_list_store_find(instancesList, settings->instance, &pos)) {
+			gtk_single_selection_set_selected(selection, pos);
+		}
 	}
-	// This signal doesn't always fire. If there's one instance total you can't re-select instance to make it active
 	g_signal_connect(selection, "selection-changed", G_CALLBACK(instance_selection_changed), instancesList);
 	g_signal_connect(widget, "activate", G_CALLBACK(activate_instance_row), instancesList);
 	gtk_widget_add_css_class(widget, "rich-list");
@@ -988,13 +1106,6 @@ static void account_list_view_setup_factory(GtkListItemFactory *factory, GtkList
 	widget = gtk_grid_new();
 	gtk_widget_set_hexpand(widget, true);
 	GtkGrid *grid = GTK_GRID(widget);
-	GtkGesture *click = gtk_gesture_click_new();
-	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_SECONDARY);
-	GMenu *menu = g_menu_new();
-	g_menu_append(menu, "Edit", "account.edit");
-	g_menu_append(menu, "Delete", "account.delete");
-	g_signal_connect(click, "pressed", G_CALLBACK(show_row_menu), menu);
-	gtk_widget_add_controller(widget, GTK_EVENT_CONTROLLER(click));
 	struct AccountRowWidgets *rw = g_new0(struct AccountRowWidgets, 1);
 	rw->grid = widget;
 
@@ -1017,7 +1128,7 @@ static void account_list_view_setup_factory(GtkListItemFactory *factory, GtkList
 }
 
 static void account_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant *parameter, gpointer *data) {
-	struct User *account = (struct User *)data;
+	MicrolauncherAccount *account = MICROLAUNCHER_ACCOUNT(data);
 	if(strcmp(g_action_get_name(G_ACTION(simple_action)), "edit") == 0) {
 
 	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "delete") == 0) {
@@ -1027,10 +1138,17 @@ static void account_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant 
 
 static void account_list_view_bind_factory(GtkListItemFactory *factory, GtkListItem *list_item, gpointer user_data) {
 	struct AccountRowWidgets *rw = g_object_get_data(G_OBJECT(list_item), "row-widgets");
+	GtkWidget *parent = gtk_widget_get_parent(rw->grid);
 
-	const char *str = gtk_string_object_get_string(GTK_STRING_OBJECT(gtk_list_item_get_item(list_item)));
-	GSList *list = *microlauncher_get_accounts();
-	struct User *account = microlauncher_account_get(list, str);
+	GtkGesture *click = gtk_gesture_click_new();
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_SECONDARY);
+	GMenu *menu = g_menu_new();
+	g_menu_append(menu, "Edit", "account.edit");
+	g_menu_append(menu, "Delete", "account.delete");
+	g_signal_connect(click, "pressed", G_CALLBACK(show_row_menu), menu);
+	gtk_widget_add_controller(parent, GTK_EVENT_CONTROLLER(click));
+
+	MicrolauncherAccount *account = gtk_list_item_get_item(list_item);
 	GSimpleActionGroup *actions = g_simple_action_group_new();
 	GSimpleAction *action;
 
@@ -1042,7 +1160,7 @@ static void account_list_view_bind_factory(GtkListItemFactory *factory, GtkListI
 	g_signal_connect(action, "activate", G_CALLBACK(account_action), account);
 	g_action_map_add_action(G_ACTION_MAP(actions), G_ACTION(action));
 
-	gtk_widget_insert_action_group(rw->grid, "account", G_ACTION_GROUP(actions));
+	gtk_widget_insert_action_group(parent, "account", G_ACTION_GROUP(actions));
 
 	GtkDragSource *drag_source = gtk_drag_source_new();
 	gtk_drag_source_set_actions(drag_source, GDK_ACTION_MOVE);
@@ -1050,16 +1168,16 @@ static void account_list_view_bind_factory(GtkListItemFactory *factory, GtkListI
 	g_signal_connect(drag_source, "prepare", G_CALLBACK(on_drag_prepare), list_item);
 	g_signal_connect(drag_source, "drag-begin", G_CALLBACK(on_drag_begin), rw->grid);
 
-	gtk_widget_add_controller(gtk_widget_get_parent(rw->grid), GTK_EVENT_CONTROLLER(drag_source));
+	gtk_widget_add_controller(parent, GTK_EVENT_CONTROLLER(drag_source));
 
 	g_object_set_data(G_OBJECT(list_item), "store", user_data);
 	GtkDropTarget *target = gtk_drop_target_new(G_TYPE_POINTER, GDK_ACTION_MOVE);
 	struct DropUserData *ondrop = g_new(struct DropUserData, 1);
 	ondrop->list_item = list_item;
 	ondrop->list = microlauncher_get_accounts();
-	ondrop->data_get_func = (DataGetFunc)microlauncher_account_get;
+	ondrop->selection = GTK_SINGLE_SELECTION(gtk_list_view_get_model(accountsView));
 	g_signal_connect_data(target, "drop", G_CALLBACK(on_drop), ondrop, (GClosureNotify)g_free, 0);
-	gtk_widget_add_controller(gtk_widget_get_parent(rw->grid), GTK_EVENT_CONTROLLER(target));
+	gtk_widget_add_controller(parent, GTK_EVENT_CONTROLLER(target));
 
 	gtk_label_set_label(rw->nameLabel, account->name);
 	gtk_label_set_label(rw->typeLabel, microlauncher_get_account_type_name(account->type));
@@ -1089,7 +1207,7 @@ static gboolean reload_code(void *data) {
 	return false;
 }
 
-static gboolean add_account_in_main(struct User *user) {
+static gboolean add_account_in_main(MicrolauncherAccount *user) {
 	add_account(user);
 	return false;
 }
@@ -1106,10 +1224,8 @@ static void check_device_code(GTask *task, gpointer source_object, gpointer task
 	} else if(result == -1) { // cancel/error
 		msaSecondsLeft = 0;	  // Request new code
 	} else if(result == 0) {
-		struct User *user = g_new0(struct User, 1);
-		user->data = userdata;
-		user->type = ACCOUNT_TYPE_MSA;
-		user->id = random_uuid();
+		MicrolauncherAccount *user = microlauncher_account_new(NULL, ACCOUNT_TYPE_MSA);
+		microlauncher_account_set_userdata(user, userdata);
 		g_idle_add(G_SOURCE_FUNC(gtk_window_close), popupWindow);
 		if(microlauncher_auth_user(user, NULL)) {
 			g_idle_add(G_SOURCE_FUNC(add_account_in_main), user);
@@ -1166,11 +1282,8 @@ struct OnAddOffline {
 };
 
 static void on_add_offline(GtkButton *button, struct OnAddOffline *data) {
-	struct User *user = g_new0(struct User, 1);
-	user->name = strdup(gtk_entry_buffer_get_text(gtk_entry_get_buffer(data->usernameEntry)));
-	user->type = ACCOUNT_TYPE_OFFLINE;
-	user->id = random_uuid();
-	user->accessToken = "-";
+	const char *name = gtk_entry_buffer_get_text(gtk_entry_get_buffer(data->usernameEntry));
+	MicrolauncherAccount *user = microlauncher_account_new(name, ACCOUNT_TYPE_OFFLINE);
 	add_account(user);
 	GtkWindow *window = data->parent;
 	gtk_window_close(window);
@@ -1310,11 +1423,12 @@ static GtkWidget *microlauncher_gui_page_accounts(void) {
 
 	box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
 	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scrolledWindow), box);
-	accountsList = gtk_string_list_new(NULL);
-	GSList *list = *microlauncher_get_accounts();
-	for(guint i = 0; i < g_slist_length(list); i++) {
-		const struct User *user = g_slist_nth(list, i)->data;
-		gtk_string_list_append(accountsList, user->id);
+	accountsList = g_list_store_new(G_TYPE_OBJECT);
+	GSList *node = *microlauncher_get_accounts();
+	while(node) {
+		MicrolauncherAccount *user = node->data;
+		g_list_store_append(accountsList, user);
+		node = node->next;
 	}
 
 	GtkSingleSelection *selection = gtk_single_selection_new(G_LIST_MODEL(accountsList));
@@ -1325,9 +1439,13 @@ static GtkWidget *microlauncher_gui_page_accounts(void) {
 	g_signal_connect(factory, "bind", G_CALLBACK(account_list_view_bind_factory), accountsList);
 
 	widget = gtk_list_view_new(GTK_SELECTION_MODEL(selection), factory);
+	accountsView = GTK_LIST_VIEW(widget);
 	gtk_single_selection_set_selected(selection, GTK_INVALID_LIST_POSITION);
 	if(settings->user) {
-		gtk_single_selection_set_selected(selection, gtk_string_list_find(accountsList, settings->user->id));
+		guint pos = G_MAXUINT;
+		if(g_list_store_find(accountsList, settings->user, &pos)) {
+			gtk_single_selection_set_selected(selection, pos);
+		}
 	}
 	g_signal_connect(selection, "selection-changed", G_CALLBACK(account_selection_changed), accountsList);
 	g_signal_connect(widget, "activate", G_CALLBACK(activate_account_row), accountsList);
@@ -1454,6 +1572,42 @@ static void scheduled_show_error(const char *msg, void *userdata) {
 	g_idle_add(G_SOURCE_FUNC(microlauncher_gui_show_err), data);
 }
 
+static void init_gpus(void) {
+#ifdef __unix
+	struct pci_access *acc = pci_alloc();
+	struct pci_filter filter;
+	pci_filter_init(acc, &filter);
+	// filter.device_class = PCI_BASE_CLASS_DISPLAY << 8;
+	filter.device_class = PCI_CLASS_DISPLAY_VGA;
+	filter.device_class_mask = 0xFF00;
+	char devbuf[256];
+	char bdfbuf[256];
+	struct pci_dev *p;
+	gpuIds = g_slist_append(NULL, NULL);
+	gpuLabels = gtk_string_list_new(NULL);
+	gtk_string_list_append(gpuLabels, "Default");
+
+	pci_init(acc);
+	pci_scan_bus(acc);
+	for(p = acc->devices; p; p = p->next) {
+		if(!pci_filter_match(&filter, p)) {
+			continue;
+		}
+		snprintf(bdfbuf, sizeof(bdfbuf), "pci-%04d_%02u_%02u_%01u", p->domain, p->bus, p->dev, p->func);
+		pci_fill_info(p, PCI_FILL_IDENT);
+		char *s = pci_lookup_name(acc, devbuf, sizeof(devbuf), PCI_LOOKUP_VENDOR | PCI_LOOKUP_DEVICE, p->vendor_id, p->device_id);
+		gtk_string_list_append(gpuLabels, strdup(s));
+		gpuIds = g_slist_append(gpuIds, strdup(bdfbuf));
+	}
+	int i = 0;
+	const char *s;
+	while((s = gtk_string_list_get_string(gpuLabels, i++))) {
+		g_print("%s\n", s);
+	}
+	pci_cleanup(acc);
+#endif
+}
+
 static void activate(GtkApplication *app, gpointer user_data) {
 	GtkWidget *widget, *box;
 	GtkCssProvider *provider = gtk_css_provider_new();
@@ -1528,6 +1682,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 
 	gtk_check_button_set_active(checkFullscreen, settings->fullscreen);
 	gtk_check_button_set_active(checkDemo, settings->demo);
+
 	microlauncher_set_callbacks(callbacks);
 
 	g_signal_connect(window, "close-request", G_CALLBACK(close_request), NULL);
@@ -1540,6 +1695,7 @@ int microlauncher_gui_show(void) {
 	int argc = 1;
 	char *argv[] = {APPID, NULL};
 	settings = microlauncher_get_settings();
+	init_gpus();
 
 	app = gtk_application_new(APPID, G_APPLICATION_NON_UNIQUE);
 	g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);

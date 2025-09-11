@@ -94,11 +94,17 @@ char *random_uuid(void);
 
 void extract_zip(const char *sourcepath, const char *destpath, const char **exclusions);
 
+char *get_escaped_command(char *const *cmdline);
+
+char **get_commandv(char *cmdline);
+
 GPid util_fork_execv(const char *dir, char *const *argv);
 
 bool util_waitpid(GPid pid, int *status);
 
 bool util_kill_process(GPid pid);
+
+#define offset_apply(pointer, offs) ((void *)((char *)pointer + offs))
 
 #ifdef _WIN32
 HRESULT CreateShortcut(LPCSTR pszTargetfile, LPCSTR pszTargetargs, LPCSTR pszLinkfile, int iShowmode, LPCSTR pszCurdir, LPCSTR pszIconfile, int iIconindex);

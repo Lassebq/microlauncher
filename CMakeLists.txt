@@ -8,11 +8,14 @@ set(SOURCES
   microlauncher.c
   microlauncher_msa.c
   microlauncher_gui.c
+  microlauncher_instance.c
+  microlauncher_account.c
   microlauncher_version_item.c
   xdgutil.c
   util.c
   json_util.c
   gtk_util.c
+  gobject_util.c
 )
 if(WIN32)
     list(APPEND SOURCES util.cpp)
@@ -23,7 +26,7 @@ set(DEPS
     gtk4 json-c gio-2.0 glib-2.0 gobject-2.0 libcurl libcrypto libzip
 )
 if(UNIX)
-    list(APPEND DEPS uuid)
+    list(APPEND DEPS uuid libpci)
 endif()
 
 pkg_check_modules(PKGCONF REQUIRED ${DEPS})
@@ -34,8 +37,6 @@ foreach(res IN LISTS ICON_RES)
     list(APPEND ICON_PNGS "${CMAKE_CURRENT_SOURCE_DIR}/assets/scaled_${res}x${res}.png")
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/scaled_${res}x${res}.png" DESTINATION "share/icons/hicolor/${res}x${res}/apps" RENAME "io.github.lassebq.microlauncher.png")
 endforeach()
-
-message(STATUS ${ICON_PNGS})
 
 if(WIN32)
     # Just in case we're cross compiling and have native executable in build environment
@@ -54,8 +55,8 @@ if(WIN32)
 endif()
 
 add_executable(microlauncher WIN32 ${SOURCES})
-if(CMAKE_COMPILER_IS_GNUCC)
-    target_compile_options(microlauncher PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type-mismatch)
+if(${CMAKE_C_COMPILER_ID} STREQUAL GNU)
+    target_compile_options(microlauncher PUBLIC -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type)
 endif()
 
 target_compile_definitions(microlauncher PRIVATE
