@@ -1,15 +1,21 @@
 #include "xdgutil.h"
-#include "glib.h"
-#ifdef __linux__
-#include "linux/limits.h"
+#include <glib.h>
+
+#if defined(__unix) || defined(__APPLE__)
 #include <pwd.h>
-#elif _WIN32
+#endif
+
+#ifdef __linux
+#include <linux/limits.h>
+#endif
+
+#if _WIN32
 #include <shlobj.h>
 #include <windows.h>
 #endif
-#include "stdbool.h"
-#include "stdio.h"
-#include "stdlib.h"
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 

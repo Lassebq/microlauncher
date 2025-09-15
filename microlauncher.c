@@ -22,6 +22,16 @@
 #include <unistd.h>
 #include <zip.h>
 
+#ifdef __linux__
+#include <linux/limits.h>
+#endif
+
+// macOS uses an outdated version of libcurl
+// which does not have this constant defined.
+#ifndef CURLFOLLOW_ALL
+#define CURLFOLLOW_ALL 1L
+#endif
+
 static GSList *instances;
 static GSList *accounts;
 

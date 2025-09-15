@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.0.3)
+cmake_minimum_required(VERSION 3.31.0)
 project(microlauncher VERSION 1.0.0 LANGUAGES C CXX)
 
 set(MICROSOFT_CLIENT_ID "95984717-05f1-4b52-8a66-064d0e1e5b55" CACHE STRING "Azure application client ID used for microsoft authentication")
@@ -25,7 +25,7 @@ find_package(PkgConfig REQUIRED)
 set(DEPS
     gtk4 json-c gio-2.0 glib-2.0 gobject-2.0 libcurl libcrypto libzip
 )
-if(UNIX)
+if(UNIX AND NOT APPLE)
     list(APPEND DEPS uuid libpci)
 endif()
 

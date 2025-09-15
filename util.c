@@ -3,8 +3,8 @@
 #ifdef __linux
 #include <linux/limits.h>
 #endif
-#ifdef __unix
-#include "uuid.h"
+#if defined(__unix) || defined(__APPLE__)
+#include <uuid/uuid.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
