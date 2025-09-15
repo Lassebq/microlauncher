@@ -925,7 +925,7 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	snprintf(libraries_dir, PATH_MAX, "%s/libraries", settings.launcher_root);
 	snprintf(assets_dir, PATH_MAX, "%s/assets", settings.launcher_root);
 	str = random_uuid();
-	snprintf(natives_dir, PATH_MAX, "%s/natives/%s", TEMPDIR, str);
+	snprintf(natives_dir, PATH_MAX, "%s/natives-%s", TEMPDIR, str);
 	free(str);
 	json_object *json = microlauncher_fetch_version(instance->version, versions_dir, libraries_dir, natives_dir, assets_dir, cancellable, path);
 	if(path[0]) {

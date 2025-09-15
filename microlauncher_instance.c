@@ -122,6 +122,32 @@ static void microlauncher_instance_class_init(MicrolauncherInstanceClass *klass)
 	g_object_class_install_properties(object_class, G_N_ELEMENTS(properties), properties);
 }
 
+MicrolauncherInstance *microlauncher_instance_clone(MicrolauncherInstance *inst) {
+	MicrolauncherInstance *self = g_object_new(MICROLAUNCHER_INSTANCE_TYPE, NULL);
+	GValue value;
+	for(guint i = 1; i < N_PROPERTIES; i++) {
+		value = (GValue)G_VALUE_INIT;
+		PropertyDef def = prop_definitions[i];
+		if(i == PROP_GAME_ARGS_LIST || i == PROP_JVM_ARGS_LIST) {
+			g_object_get_property(G_OBJECT(inst), def.name, &value);
+			GSList *newList = NULL;
+			GSList *node = g_value_get_pointer(&value);
+			while(node) {
+				newList = g_slist_append(newList, g_strdup(node->data));
+				node = node->next;
+			}
+			g_value_set_pointer(&value, newList);
+			g_object_set_property(G_OBJECT(self), def.name, &value);
+			continue;
+		}
+		if(def.name) {
+			g_object_get_property(G_OBJECT(inst), def.name, &value);
+			g_object_set_property(G_OBJECT(self), def.name, &value);
+		}
+	}
+	return self;
+}
+
 MicrolauncherInstance *microlauncher_instance_new(void) {
 	MicrolauncherInstance *self = g_object_new(MICROLAUNCHER_INSTANCE_TYPE, NULL);
 	return self;

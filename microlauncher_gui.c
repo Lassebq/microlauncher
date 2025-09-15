@@ -1,14 +1,17 @@
+#include "gio/gio.h"
+#include "glib-object.h"
 #include "gtk_util.h"
 #include "json_object.h"
 #include "json_types.h"
 #include "json_util.h"
 #include "microlauncher.h"
-#include "microlauncher_instance.h"
 #include "microlauncher_account.h"
+#include "microlauncher_instance.h"
 #include "microlauncher_msa.h"
 #include "microlauncher_version_item.h"
 #include "util.h"
 #include "xdgutil.h"
+#include <ctype.h>
 #include <curl/curl.h>
 #include <glib.h>
 #include <gtk/gtk.h>
@@ -95,16 +98,24 @@ static void remove_instance(MicrolauncherInstance *instance) {
 	microlauncher_gui_refresh_instance();
 }
 
-static void add_instance(MicrolauncherInstance *instance) {
+static void add_instance(MicrolauncherInstance *instance, guint index) {
+	guint n = g_list_model_get_n_items(G_LIST_MODEL(instancesList));
 	GSList **instances = microlauncher_get_instances();
-	*instances = g_slist_append(*instances, instance);
-	g_list_store_append(instancesList, instance);
+	*instances = g_slist_insert(*instances, instance, index);
+	if(index > n) {
+		index = n;
+	}
+	g_list_store_insert(instancesList, index, instance);
 }
 
-static void add_account(MicrolauncherAccount *user) {
+static void add_account(MicrolauncherAccount *user, guint index) {
+	guint n = g_list_model_get_n_items(G_LIST_MODEL(accountsList));
 	GSList **accounts = microlauncher_get_accounts();
-	*accounts = g_slist_append(*accounts, user);
-	g_list_store_append(accountsList, user);
+	*accounts = g_slist_insert(*accounts, user, index);
+	if(index > n) {
+		index = n;
+	}
+	g_list_store_insert(accountsList, index, user);
 }
 
 static void browse_directory_click(GtkButton *button, const gpointer p) {
@@ -249,7 +260,7 @@ static void create_or_modify_instance(GtkButton *button, void *userdata) {
 	g_value_set_string(&strVal, item->version);
 	g_object_set_property(G_OBJECT(inst), "version", &strVal);
 	if(!createInstance->toReplace) {
-		add_instance(inst);
+		add_instance(inst, G_MAXUINT);
 	}
 	microlauncher_gui_refresh_instance();
 	gtk_window_destroy(createInstance->dialog);
@@ -273,7 +284,7 @@ struct ModifyInstanceName {
 	GtkWidget *createButton;
 };
 
-const MicrolauncherInstance *get_instance_by_name(const char *name) {
+static const MicrolauncherInstance *get_instance_by_name(const char *name) {
 	GSList *node = *microlauncher_get_instances();
 	while(node) {
 		MicrolauncherInstance *inst = node->data;
@@ -285,7 +296,7 @@ const MicrolauncherInstance *get_instance_by_name(const char *name) {
 	return NULL;
 }
 
-void instance_name_changed(GtkEntry *self, gpointer user_data) {
+static void instance_name_changed(GtkEntry *self, gpointer user_data) {
 	struct ModifyInstanceName instName = *(struct ModifyInstanceName *)user_data;
 	const char *text = gtk_entry_get_text(self);
 	if(strlen(text) == 0) {
@@ -877,6 +888,16 @@ static void instance_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant
 	MicrolauncherInstance *inst = (MicrolauncherInstance *)data;
 	if(strcmp(g_action_get_name(G_ACTION(simple_action)), "edit") == 0) {
 		microlauncher_modify_instance_window(NULL, inst);
+	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "copy") == 0) {
+		GSList *instances = *microlauncher_get_instances();
+		MicrolauncherInstance *copy = microlauncher_instance_clone(inst);
+		GValue val = G_VALUE_INIT;
+		g_object_get_property(G_OBJECT(copy), "name", &val);
+		char *str = g_strdup_printf("%s (Copy)", g_value_get_string(&val));
+		g_value_set_string(&val, str);
+		g_object_set_property(G_OBJECT(copy), "name", &val);
+		free(str);
+		add_instance(copy, g_slist_index(instances, inst) + 1);
 	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "create-launcher") == 0) {
 		microlauncher_create_launcher(inst);
 	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "delete") == 0) {
@@ -899,10 +920,10 @@ struct DropUserData {
 };
 
 static gboolean on_drop(GtkDropTarget *target,
-					const GValue *value,
-					double x,
-					double y,
-					gpointer user_data) {
+						const GValue *value,
+						double x,
+						double y,
+						gpointer user_data) {
 	struct DropUserData *ondrop = user_data;
 	GtkListItem *list_item = GTK_LIST_ITEM(ondrop->list_item);
 	GListStore *store = g_object_get_data(G_OBJECT(list_item), "store");
@@ -953,7 +974,7 @@ static void on_drag_begin(GtkDragSource *source,
 	g_object_unref(paintable);
 }
 
-static void update_icon(GObject* self, GParamSpec* pspec, gpointer user_data) {
+static void update_icon(GObject *self, GParamSpec *pspec, gpointer user_data) {
 	GValue value = G_VALUE_INIT;
 	g_value_init(&value, pspec->value_type);
 	g_object_get_property(self, pspec->name, &value);
@@ -970,6 +991,7 @@ static void instance_list_view_bind_factory(GtkListItemFactory *factory, GtkList
 	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_SECONDARY);
 	GMenu *menu = g_menu_new();
 	g_menu_append(menu, "Edit", "instance.edit");
+	g_menu_append(menu, "Copy", "instance.copy");
 #ifdef _WIN32
 	g_menu_append(menu, "Create shortcut", "instance.create-launcher");
 #else
@@ -983,7 +1005,7 @@ static void instance_list_view_bind_factory(GtkListItemFactory *factory, GtkList
 	GSimpleActionGroup *actions = g_simple_action_group_new();
 	GSimpleAction *action;
 
-	const char *action_names[] = {"edit", "create-launcher", "delete", NULL};
+	const char *action_names[] = {"edit", "copy", "create-launcher", "delete", NULL};
 	int i = 0;
 	while(action_names[i]) {
 		action = g_simple_action_new(action_names[i], NULL);
@@ -1208,7 +1230,7 @@ static gboolean reload_code(void *data) {
 }
 
 static gboolean add_account_in_main(MicrolauncherAccount *user) {
-	add_account(user);
+	add_account(user, G_MAXUINT);
 	return false;
 }
 
@@ -1279,48 +1301,122 @@ static gboolean update_msa_timeout(void *data) {
 struct OnAddOffline {
 	GtkWindow *parent;
 	GtkEntry *usernameEntry;
+	GtkEntry *uuidEntry;
+	GtkWidget *addAccountButton;
 };
 
 static void on_add_offline(GtkButton *button, struct OnAddOffline *data) {
-	const char *name = gtk_entry_buffer_get_text(gtk_entry_get_buffer(data->usernameEntry));
-	MicrolauncherAccount *user = microlauncher_account_new(name, ACCOUNT_TYPE_OFFLINE);
-	add_account(user);
+	const char *str = gtk_entry_buffer_get_text(gtk_entry_get_buffer(data->usernameEntry));
+	MicrolauncherAccount *user = microlauncher_account_new(str, ACCOUNT_TYPE_OFFLINE);
+	str = gtk_entry_buffer_get_text(gtk_entry_get_buffer(data->uuidEntry));
+	if(str && strlen(str) > 0) {
+		microlauncher_account_set_uuid(user, str);
+	}
+	add_account(user, G_MAXUINT);
 	GtkWindow *window = data->parent;
 	gtk_window_close(window);
 }
 
-static void offline_username_entry_changed(GtkEntry *entry, gpointer userdata) {
-	GtkWidget *addAccountButton = GTK_WIDGET(userdata);
-	gtk_widget_set_sensitive(addAccountButton, strlen(gtk_entry_get_text(entry)) > 0);
+static void on_offline_entry_changed(GtkEntry *self, gpointer user_data) {
+	struct OnAddOffline offline = *(struct OnAddOffline *)user_data;
+	bool allvalid = true;
+	const char *text = gtk_entry_get_text(offline.usernameEntry);
+	if(strlen(text) == 0) {
+		gtk_widget_add_css_class(GTK_WIDGET(offline.usernameEntry), "error");
+		gtk_widget_set_tooltip_text(GTK_WIDGET(offline.usernameEntry), "Name cannot be empty");
+		allvalid = false;
+	} else {
+		gtk_widget_remove_css_class(GTK_WIDGET(offline.usernameEntry), "error");
+		gtk_widget_set_tooltip_text(GTK_WIDGET(offline.usernameEntry), "");
+	}
+	text = gtk_entry_get_text(offline.uuidEntry);
+	bool valid = true;
+	int n = strlen(text);
+	if(n != 0) {
+		valid = valid && (n == 36 || n == 32);
+		if(n == 36) {
+			valid = valid && text[8] == '-' &&
+					 text[13] == '-' &&
+					 text[18] == '-' &&
+					 text[23] == '-';
+
+			for(int i = 0; i < n; i++) {
+				if(i == 8 || i == 13 || i == 18 || i == 23) {
+					continue;
+				}
+				valid = valid && isxdigit(text[i]);
+				if(!valid) {
+					break;
+				}
+			}
+		}
+		if(n == 32) {
+			for(int i = 0; i < n; i++) {
+				valid = valid && isxdigit(text[i]);
+				if(!valid) {
+					break;
+				}
+			}
+		}
+	}
+	if(!valid) {
+		gtk_widget_add_css_class(GTK_WIDGET(offline.uuidEntry), "error");
+		gtk_widget_set_tooltip_text(GTK_WIDGET(offline.uuidEntry), "Must be valid UUID");
+		allvalid = false;
+	} else {
+		gtk_widget_remove_css_class(GTK_WIDGET(offline.uuidEntry), "error");
+		gtk_widget_set_tooltip_text(GTK_WIDGET(offline.uuidEntry), "");
+	}
+
+	gtk_widget_set_sensitive(offline.addAccountButton, allvalid);
 }
 
 static GtkWidget *microlauncher_gui_add_offline(GtkWindow *newWindow) {
 	GtkWidget *widget;
-	GtkBox *box;
+	GtkGrid *grid;
 	GtkEntry *entry;
-	widget = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
-	box = GTK_BOX(widget);
+	widget = gtk_grid_new();
+	grid = GTK_GRID(widget);
+	struct OnAddOffline *cbdata = g_new0(struct OnAddOffline, 1);
+
+	widget = gtk_label_new("Username:");
+	gtk_label_set_xalign(GTK_LABEL(widget), 1.0);
+	gtk_widget_set_margin(widget, 10, 10, 10, 10);
+	gtk_grid_attach(grid, widget, 0, 0, 1, 1);
 
 	widget = gtk_entry_new();
 	entry = GTK_ENTRY(widget);
+	cbdata->usernameEntry = entry;
+	g_signal_connect(entry, "changed", G_CALLBACK(on_offline_entry_changed), cbdata);
 	gtk_widget_set_hexpand(widget, true);
-	widget = gtk_widget_with_label("Username:", widget);
+	gtk_widget_set_margin(widget, 10, 10, 0, 10);
+	gtk_grid_attach(grid, widget, 1, 0, 1, 1);
+
+	widget = gtk_label_new("UUID:");
+	gtk_label_set_xalign(GTK_LABEL(widget), 1.0);
 	gtk_widget_set_margin(widget, 10, 10, 10, 10);
-	gtk_box_append(box, widget);
+	gtk_grid_attach(grid, widget, 0, 1, 1, 1);
+
+	widget = gtk_entry_new();
+	entry = GTK_ENTRY(widget);
+	g_signal_connect(widget, "changed", G_CALLBACK(on_offline_entry_changed), cbdata);
+	gtk_entry_set_placeholder_text(entry, "Leave blank for random UUID");
+	cbdata->uuidEntry = entry;
+	gtk_widget_set_hexpand(widget, true);
+	gtk_widget_set_margin(widget, 10, 10, 0, 10);
+	gtk_grid_attach(grid, widget, 1, 1, 1, 1);
 
 	widget = gtk_button_new_with_label("Add account");
+	cbdata->addAccountButton = widget;
 	gtk_widget_set_sensitive(widget, false);
-	g_signal_connect(entry, "changed", G_CALLBACK(offline_username_entry_changed), widget);
-	struct OnAddOffline *cbdata = g_new0(struct OnAddOffline, 1);
 	cbdata->parent = newWindow;
-	cbdata->usernameEntry = entry;
 	g_signal_connect_data(widget, "clicked", G_CALLBACK(on_add_offline), cbdata, (GClosureNotify)g_free, 0);
 	gtk_widget_set_vexpand(widget, true);
 	gtk_widget_set_valign(widget, GTK_ALIGN_END);
 	gtk_widget_set_margin(widget, 10, 10, 10, 10);
-	gtk_box_append(box, widget);
+	gtk_grid_attach(grid, widget, 0, 2, 2, 1);
 
-	return GTK_WIDGET(box);
+	return GTK_WIDGET(grid);
 }
 
 static void on_stack_page_changed(GObject *obj, GParamSpec *pspec, gpointer user_data) {
