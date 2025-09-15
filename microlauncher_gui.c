@@ -797,20 +797,20 @@ struct InstanceRowWidgets {
 	GtkImage *icon;
 };
 
-static void popover_destroy(GtkWidget *self, void *user_data) {
-	gtk_widget_unparent(self);
+static void popover_destroy(GtkWidget *self, GtkWidget *destroy) {
+	gtk_widget_unparent(destroy);
 }
 
 static void show_row_menu(GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y, gpointer user_data) {
 	GtkWidget *row_widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
 	GtkPopover *popover = GTK_POPOVER(gtk_popover_menu_new_from_model(G_MENU_MODEL(user_data)));
 
-	g_signal_connect(popover, "closed", G_CALLBACK(popover_destroy), NULL);
 	gtk_popover_set_has_arrow(popover, false);
 	gtk_popover_set_pointing_to(popover, &(GdkRectangle){(int)x, (int)y, 1, 1});
 	gtk_widget_set_halign(GTK_WIDGET(popover), GTK_ALIGN_START);
 	gtk_widget_set_parent(GTK_WIDGET(popover), row_widget);
 	gtk_popover_popup(popover);
+	g_signal_connect(row_widget, "destroy", G_CALLBACK(popover_destroy), popover);
 }
 
 static void instance_list_view_setup_factory(GtkListItemFactory *factory, GtkListItem *list_item, gpointer user_data) {
