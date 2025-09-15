@@ -71,11 +71,11 @@ bool xdgutil_init(void) {
 #ifdef _WIN32
 
 		if(SHGetFolderPathA(NULL, CSIDL_APPDATA, NULL, 0, dir) == S_OK) {
-			XDG_DATA_HOME = strdup(dir);
+			XDG_CONFIG_HOME = strdup(dir);
 		} else {
 #endif
 			snprintf(dir, PATH_MAX, "%s/%s", HOME, ".config");
-			XDG_DATA_HOME = strdup(dir);
+			XDG_CONFIG_HOME = strdup(dir);
 #ifdef _WIN32
 		}
 #endif

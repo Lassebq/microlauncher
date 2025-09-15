@@ -32,5 +32,6 @@ brew install gtk4 json-c libzip
 ## TODO
 
 ### GUI:
-- Figure out why right click context menu doesn't get fully destroyed?
+- Save java and display their version
+- Implement java downloading from https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json or similar
 - Other memory management fixes

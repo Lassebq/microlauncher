@@ -797,10 +797,15 @@ struct InstanceRowWidgets {
 	GtkImage *icon;
 };
 
+static void popover_destroy(GtkWidget *self, void *user_data) {
+	gtk_widget_unparent(self);
+}
+
 static void show_row_menu(GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y, gpointer user_data) {
 	GtkWidget *row_widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
 	GtkPopover *popover = GTK_POPOVER(gtk_popover_menu_new_from_model(G_MENU_MODEL(user_data)));
 
+	g_signal_connect(popover, "closed", G_CALLBACK(popover_destroy), NULL);
 	gtk_popover_set_has_arrow(popover, false);
 	gtk_popover_set_pointing_to(popover, &(GdkRectangle){(int)x, (int)y, 1, 1});
 	gtk_widget_set_halign(GTK_WIDGET(popover), GTK_ALIGN_START);
@@ -1336,9 +1341,9 @@ static void on_offline_entry_changed(GtkEntry *self, gpointer user_data) {
 		valid = valid && (n == 36 || n == 32);
 		if(n == 36) {
 			valid = valid && text[8] == '-' &&
-					 text[13] == '-' &&
-					 text[18] == '-' &&
-					 text[23] == '-';
+					text[13] == '-' &&
+					text[18] == '-' &&
+					text[23] == '-';
 
 			for(int i = 0; i < n; i++) {
 				if(i == 8 || i == 13 || i == 18 || i == 23) {
