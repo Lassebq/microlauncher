@@ -1,17 +1,14 @@
-#include <microlauncher.h>
+#include <curl/curl.h>
+#include <curl/easy.h>
 #include <gio/gio.h>
 #include <glib-object.h>
 #include <glib.h>
 #include <json.h>
 #include <json_object.h>
 #include <json_types.h>
-#include <util/json_util.h>
+#include <microlauncher.h>
 #include <microlauncher_gui.h>
 #include <microlauncher_msa.h>
-#include <util/util.h>
-#include <util/xdgutil.h>
-#include <curl/curl.h>
-#include <curl/easy.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -20,6 +17,9 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <util/json_util.h>
+#include <util/util.h>
+#include <util/xdgutil.h>
 #include <zip.h>
 
 #ifdef __linux__
@@ -306,7 +306,7 @@ size_t write_callback(void *ptr, size_t size, size_t nmemb, void *userdata) {
 void microlauncher_set_curl_opts(CURL *curl) {
 	curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA);
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, CURLFOLLOW_ALL);
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
 }
 
 bool microlauncher_http_get_with_handle(CURL *curl, const char *url, const char *save_location) {
@@ -855,7 +855,6 @@ void microlauncher_save_settings(void) {
 	json_object_put(obj);
 }
 
-
 static char *apply_replaces(const char *const *replaces, const char *str) {
 	int i = 0;
 	String strBuff = string_new(str);
@@ -999,7 +998,7 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	c = 0;
 	char *argv[256];
 	argv[c++] = instance->javaLocation ? instance->javaLocation : "java"; /* Try java from path unless explicitly set */
-// JVM args
+																		  // JVM args
 	if(json_object_is_type(argumentsJvm, json_type_array)) {
 		int k = add_arguments(argumentsJvm, replaces, features, argv + c, malloc_strs + m);
 		c += k;

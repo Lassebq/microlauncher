@@ -7,7 +7,7 @@ MicroLauncher is a Minecraft launcher implementation for official game client JS
 - By default MicroLauncher uses [BetterJSONs](https://github.com/MCPHackers/BetterJSONs) which bundle slightly different libraries for versions prior to 1.13 to provide better experience. `-lwjgl3` JSONs use [legacy-lwjgl3](https://github.com/MCPHackers/legacy-lwjgl3) to allow better Wayland support via glfw instead of using the broken LWJGL 2 implementation.
 
 ## Build dependencies
-For building this project it is recommended to use CMake. Meson support is to be removed.
+This project uses [CMake](https://cmake.org/). Older versions may also require [Meson](https://mesonbuild.com/).
 
 ### Arch Linux:
 ```

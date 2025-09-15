@@ -1,9 +1,9 @@
 #pragma once
 
+#include <gio/gio.h>
+#include <glib-object.h>
 #include <microlauncher_types.h>
 #include <stdbool.h>
-#include <glib-object.h>
-#include <gio/gio.h>
 
 G_BEGIN_DECLS
 
