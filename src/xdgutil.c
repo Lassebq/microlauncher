@@ -1,4 +1,4 @@
-#include "xdgutil.h"
+#include <util/xdgutil.h>
 #include <glib.h>
 
 #if defined(__unix) || defined(__APPLE__)

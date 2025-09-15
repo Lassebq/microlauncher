@@ -1,6 +1,6 @@
-#include "microlauncher_instance.h"
-#include "util.h"
-#include "gobject_util.h"
+#include <microlauncher_instance.h>
+#include <util/util.h>
+#include <gobject_util.h>
 #include <glib-object.h>
 #include <glib.h>
 #include <stdint.h>

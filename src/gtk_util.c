@@ -1,11 +1,11 @@
-#include "gio/gio.h"
-#include "glib-object.h"
-#include "glib.h"
-#include "gtk/gtk.h"
-#include "gtk/gtkdropdown.h"
-#include "gtk/gtkexpression.h"
-#include "gtk/gtkshortcut.h"
-#include "pango/pango-layout.h"
+#include <gio/gio.h>
+#include <glib-object.h>
+#include <glib.h>
+#include <gtk/gtk.h>
+#include <gtk/gtkdropdown.h>
+#include <gtk/gtkexpression.h>
+#include <gtk/gtkshortcut.h>
+#include <pango/pango-layout.h>
 
 GtkWidget *gtk_widget_with_label(gchar *labelStr, GtkWidget *widget) {
 	GtkBox *box = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10));

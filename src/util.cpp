@@ -1,4 +1,5 @@
-#include "glib.h"
+#if _WIN32
+#include <glib.h>
 #include <util.h>
 #include <windows.h>
 #include <objbase.h>
@@ -62,3 +63,4 @@ HRESULT CreateShortcut(LPCSTR pszTargetfile, LPCSTR pszTargetargs, LPCSTR pszLin
 	CoUninitialize();
 	return (hRes);
 }
+#endif

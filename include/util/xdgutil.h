@@ -1,6 +1,8 @@
+#pragma once
+
 #ifndef XDGUTIL_H
 #define XDGUTIL_H
-#include "stdbool.h"
+#include <stdbool.h>
 
 extern char *HOME;
 extern char *TEMPDIR;

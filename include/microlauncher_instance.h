@@ -22,4 +22,6 @@ MicrolauncherInstance *microlauncher_instance_clone(MicrolauncherInstance *inst)
 
 MicrolauncherInstance *microlauncher_instance_new(void);
 
+MicrolauncherInstance *microlauncher_instance_clone(MicrolauncherInstance *inst);
+
 G_END_DECLS

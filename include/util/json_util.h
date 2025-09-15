@@ -1,7 +1,7 @@
 #ifndef JSON_UTIL_H
 #define JSON_UTIL_H
 
-#include "json_types.h"
+#include <json_types.h>
 #include <stdbool.h>
 #include <stdint.h>
 

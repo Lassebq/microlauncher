@@ -1,7 +1,7 @@
-#include "microlauncher_account.h"
-#include "microlauncher_msa.h"
-#include "util.h"
-#include "gobject_util.h"
+#include <microlauncher_account.h>
+#include <microlauncher_msa.h>
+#include <util.h>
+#include <gobject_util.h>
 #include <glib-object.h>
 #include <glib.h>
 #include <stdint.h>

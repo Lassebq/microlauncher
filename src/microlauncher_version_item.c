@@ -1,6 +1,6 @@
-#include "microlauncher_version_item.h"
-#include "glib-object.h"
-#include "glib.h"
+#include <microlauncher_version_item.h>
+#include <glib-object.h>
+#include <glib.h>
 
 enum {
 	PROP_VERSION_LABEL = 1,

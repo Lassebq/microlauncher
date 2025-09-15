@@ -1,12 +1,12 @@
-#include "microlauncher_msa.h"
-#include "glib.h"
-#include "glib/gprintf.h"
-#include "json.h"
-#include "json_object.h"
-#include "json_types.h"
-#include "json_util.h"
-#include "microlauncher.h"
-#include "util.h"
+#include <microlauncher_msa.h>
+#include <glib.h>
+#include <glib/gprintf.h>
+#include <json.h>
+#include <json_object.h>
+#include <json_types.h>
+#include <util/json_util.h>
+#include <microlauncher.h>
+#include <util.h>
 #include <stdlib.h>
 
 bool microlauncher_msa_xboxlive_auth(struct MicrosoftUser *user) {
