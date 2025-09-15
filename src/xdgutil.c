@@ -1,5 +1,5 @@
-#include "xdgutil.h"
 #include <glib.h>
+#include <util/xdgutil.h>
 
 #if defined(__unix) || defined(__APPLE__)
 #include <pwd.h>

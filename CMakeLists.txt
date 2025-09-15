@@ -5,17 +5,17 @@ set(MICROSOFT_CLIENT_ID "95984717-05f1-4b52-8a66-064d0e1e5b55" CACHE STRING "Azu
 option(USE_MOJANG_MANIFEST "Uses official mojang manifest without tweaked client JSONs" OFF)
 
 set(SOURCES
-  microlauncher.c
-  microlauncher_msa.c
-  microlauncher_gui.c
-  microlauncher_instance.c
-  microlauncher_account.c
-  microlauncher_version_item.c
-  xdgutil.c
-  util.c
-  json_util.c
-  gtk_util.c
-  gobject_util.c
+  src/microlauncher.c
+  src/microlauncher_msa.c
+  src/microlauncher_gui.c
+  src/microlauncher_instance.c
+  src/microlauncher_account.c
+  src/microlauncher_version_item.c
+  src/xdgutil.c
+  src/util.c
+  src/json_util.c
+  src/gtk_util.c
+  src/gobject_util.c
 )
 if(WIN32)
     list(APPEND SOURCES util.cpp)
@@ -67,7 +67,7 @@ if(${USE_MOJANG_MANIFEST})
 endif()
 target_link_directories(microlauncher PRIVATE ${PKGCONF_LIBRARY_DIRS})
 target_link_libraries(microlauncher PRIVATE ${PKGCONF_LIBRARIES} m)
-target_include_directories(microlauncher PRIVATE ${PKGCONF_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(microlauncher PRIVATE ${PKGCONF_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/include/util)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BUILD_DIR})
 
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/io.github.lassebq.microlauncher.desktop" DESTINATION share/applications)

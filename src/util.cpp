@@ -1,11 +1,12 @@
-#include "glib.h"
-#include <util.h>
-#include <windows.h>
+#if _WIN32
+#include <glib.h>
 #include <objbase.h>
 #include <objidl.h>
 #include <shlguid.h>
 #include <shlobj.h>
 #include <shobjidl.h>
+#include <util.h>
+#include <windows.h>
 #include <winnls.h>
 
 HRESULT CreateShortcut(LPCSTR pszTargetfile, LPCSTR pszTargetargs, LPCSTR pszLinkfile, int iShowmode, LPCSTR pszCurdir, LPCSTR pszIconfile, int iIconindex) {
@@ -13,8 +14,8 @@ HRESULT CreateShortcut(LPCSTR pszTargetfile, LPCSTR pszTargetargs, LPCSTR pszLin
 	IShellLink *pShellLink;
 	IPersistFile *pPersistFile;
 	WCHAR wszLinkfile[MAX_PATH];
-	
-    CoInitialize(NULL);
+
+	CoInitialize(NULL);
 	hRes = E_INVALIDARG;
 	if(
 		(pszTargetfile != NULL) && (strlen(pszTargetfile) > 0) &&
@@ -51,8 +52,8 @@ HRESULT CreateShortcut(LPCSTR pszTargetfile, LPCSTR pszTargetargs, LPCSTR pszLin
 									IPersistFile object */
 			if(SUCCEEDED(hRes)) {
 				MultiByteToWideChar(CP_ACP, 0,
-														pszLinkfile, -1,
-														wszLinkfile, MAX_PATH);
+									pszLinkfile, -1,
+									wszLinkfile, MAX_PATH);
 				hRes = pPersistFile->Save(wszLinkfile, TRUE);
 				pPersistFile->Release();
 			}
@@ -62,3 +63,4 @@ HRESULT CreateShortcut(LPCSTR pszTargetfile, LPCSTR pszTargetargs, LPCSTR pszLin
 	CoUninitialize();
 	return (hRes);
 }
+#endif

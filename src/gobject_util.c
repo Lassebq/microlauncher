@@ -1,8 +1,8 @@
-#include "gobject_util.h"
-#include "glib-object.h"
-#include "glibconfig.h"
-#include "util.h"
+#include <glib-object.h>
+#include <glibconfig.h>
+#include <gobject_util.h>
 #include <stdio.h>
+#include <util/util.h>
 
 void gobj_util_set_prop(GObject *obj, PropertyDef prop, const GValue *value) {
 	void **member = offset_apply(obj, prop.memberOffs);

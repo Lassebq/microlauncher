@@ -1,10 +1,10 @@
-#include "microlauncher_account.h"
-#include "microlauncher_msa.h"
-#include "util.h"
-#include "gobject_util.h"
 #include <glib-object.h>
 #include <glib.h>
+#include <gobject_util.h>
+#include <microlauncher_account.h>
+#include <microlauncher_msa.h>
 #include <stdint.h>
+#include <util.h>
 
 enum {
 	PROP_NAME = 1,
@@ -20,40 +20,15 @@ static GParamSpec *properties[N_PROPERTIES] = {NULL};
 
 static PropertyDef prop_definitions[N_PROPERTIES] = {
 	[PROP_NAME] = {
-		"name",
-		G_TYPE_STRING,
-		offsetof(MicrolauncherAccount, name),
-		G_PARAM_READWRITE,
-		g_free
-	},
-	[PROP_TYPE] = {
-		"type",
-		G_TYPE_INT,
-		offsetof(MicrolauncherAccount, type),
-		G_PARAM_READWRITE,
-		g_free
-	},
-	[PROP_SESSION_UUID] = {
-		"session-uuid",
-		G_TYPE_STRING,
-		offsetof(MicrolauncherAccount, uuid),
-		G_PARAM_READWRITE,
-		g_free
-	},
-	[PROP_ID] = {
-		"id",
-		G_TYPE_STRING,
-		offsetof(MicrolauncherAccount, id),
-		G_PARAM_READWRITE,
-		g_free
-	},
-	[PROP_DATA] = {
-		"data",
-		G_TYPE_POINTER,
-		offsetof(MicrolauncherAccount, data),
-		G_PARAM_READWRITE,
-		g_free
-	}
+				   "name",
+				   G_TYPE_STRING,
+				   offsetof(MicrolauncherAccount,								   name),
+				   G_PARAM_READWRITE,
+				   g_free																						 },
+	[PROP_TYPE] = {"type",		   G_TYPE_INT,	   offsetof(MicrolauncherAccount, type), G_PARAM_READWRITE, g_free},
+	[PROP_SESSION_UUID] = {"session-uuid", G_TYPE_STRING,  offsetof(MicrolauncherAccount, uuid), G_PARAM_READWRITE, g_free},
+	[PROP_ID] = {"id",		   G_TYPE_STRING,  offsetof(MicrolauncherAccount, id),	  G_PARAM_READWRITE, g_free},
+	[PROP_DATA] = {"data",		   G_TYPE_POINTER, offsetof(MicrolauncherAccount, data), G_PARAM_READWRITE, g_free}
 };
 
 G_DEFINE_TYPE(MicrolauncherAccount, microlauncher_account, G_TYPE_OBJECT)
@@ -95,7 +70,7 @@ static void microlauncher_account_get_property(GObject *object, guint property_i
 	if(def.name) {
 		gobj_util_get_prop(object, def, value);
 	} else {
-		switch (property_id) {
+		switch(property_id) {
 			case PROP_ACCESS_TOKEN:
 				switch(self->type) {
 					case ACCOUNT_TYPE_OFFLINE:

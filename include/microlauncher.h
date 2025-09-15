@@ -1,12 +1,12 @@
 #pragma once
 
-#include <gio/gio.h>
-#include "glib.h"
 #include <curl/curl.h>
+#include <gio/gio.h>
+#include <glib.h>
 #include <json_types.h>
+#include <microlauncher_account.h>
+#include <microlauncher_instance.h>
 #include <stdbool.h>
-#include "microlauncher_instance.h"
-#include "microlauncher_account.h"
 
 #define MOJANG_MANIFEST "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
 #define BETTERJSONS_MANIFEST "https://mcphackers.org/BetterJSONs/version_manifest_v2.json"

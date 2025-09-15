@@ -4,9 +4,9 @@
 #include <linux/limits.h>
 #endif
 #if defined(__unix) || defined(__APPLE__)
-#include <uuid/uuid.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include <uuid/uuid.h>
 #endif
 #ifdef __WIN32
 #include <processthreadsapi.h>

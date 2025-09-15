@@ -1,5 +1,5 @@
 #pragma once
-#include "microlauncher.h"
+#include <microlauncher.h>
 
 #define URL_XBL_AUTH "https://user.auth.xboxlive.com/user/authenticate"
 #define URL_XBL_XSTS "https://xsts.auth.xboxlive.com/xsts/authorize"

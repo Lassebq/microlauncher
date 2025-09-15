@@ -1,5 +1,5 @@
 #pragma once
-#include "gtk/gtk.h"
+#include <gtk/gtk.h>
 
 GtkWidget *gtk_widget_with_label(gchar *labelStr, GtkWidget *widget);
 

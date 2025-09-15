@@ -1,13 +1,13 @@
 #pragma once
-#include <glib.h>
 #include <glib-object.h>
+#include <glib.h>
 
 typedef struct {
-    gchar *name;
-    GType type;
-    size_t memberOffs;
-    GParamFlags flags;
-    GFreeFunc free_func;
+	gchar *name;
+	GType type;
+	size_t memberOffs;
+	GParamFlags flags;
+	GFreeFunc free_func;
 } PropertyDef;
 
 void gobj_util_set_prop(GObject *obj, PropertyDef prop, const GValue *value);

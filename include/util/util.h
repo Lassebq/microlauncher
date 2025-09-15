@@ -1,9 +1,9 @@
 #pragma once
 
-#include "glib.h"
+#include <glib.h>
 
 #ifdef _WIN32
-#include "windows.h"
+#include <windows.h>
 #endif
 
 G_BEGIN_DECLS
