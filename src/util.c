@@ -16,7 +16,7 @@
 #include <openssl/sha.h>
 #include <stdbool.h>
 #include <string.h>
-#include <util.h>
+#include <util/util.h>
 #include <zip.h>
 
 String string_new_n(int n) {
@@ -315,7 +315,8 @@ void extract_zip(const char *sourcepath, const char *destpath, const char **excl
 	zip_stat_t stat;
 	zip_file_t *file;
 	FILE *out;
-	size_t sum, read;
+	size_t sum;
+	zip_int64_t read;
 	char pathbuf[PATH_MAX];
 	char buf[BUFSIZ];
 	zip = zip_open(sourcepath, 0, NULL);

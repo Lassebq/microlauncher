@@ -1,8 +1,8 @@
 #include <glib-object.h>
 #include <glib.h>
-#include <gobject_util.h>
 #include <microlauncher_instance.h>
 #include <stdint.h>
+#include <util/gobject_util.h>
 #include <util/util.h>
 
 enum {
@@ -18,20 +18,59 @@ enum {
 
 static GParamSpec *properties[N_PROPERTIES] = {NULL};
 
+// clang-format off
 static PropertyDef prop_definitions[N_PROPERTIES] = {
 	[PROP_NAME] = {
-				   "name",
-				   G_TYPE_STRING,
-				   offsetof(MicrolauncherInstance,									name),
-				   G_PARAM_READWRITE,
-				   g_free																													 },
-	[PROP_VERSION] = {"version",		 G_TYPE_STRING,	offsetof(MicrolauncherInstance, version),		  G_PARAM_READWRITE, g_free				   },
-	[PROP_LOCATION] = {"location",	   G_TYPE_STRING,  offsetof(MicrolauncherInstance, location),		 G_PARAM_READWRITE, g_free				  },
-	[PROP_JAVA_LOCATION] = {"java-location", G_TYPE_STRING,	offsetof(MicrolauncherInstance, javaLocation),  G_PARAM_READWRITE, g_free					},
-	[PROP_ICON] = {"icon",		   G_TYPE_STRING,  offsetof(MicrolauncherInstance, icon),			 G_PARAM_READWRITE, g_free				  },
-	[PROP_GAME_ARGS_LIST] = {"game-args",	  G_TYPE_POINTER, offsetof(MicrolauncherInstance, extraGameArgs), G_PARAM_READWRITE, (GFreeFunc)g_slist_free},
-	[PROP_JVM_ARGS_LIST] = {"jvm-args",		G_TYPE_POINTER, offsetof(MicrolauncherInstance, jvmArgs),		  G_PARAM_READWRITE, (GFreeFunc)g_slist_free}
+		"name",
+		G_TYPE_STRING,
+		offsetof(MicrolauncherInstance, name),
+		G_PARAM_READWRITE,
+		g_free
+	},
+	[PROP_VERSION] = {
+		"version",
+		G_TYPE_STRING,
+		offsetof(MicrolauncherInstance, version),
+		G_PARAM_READWRITE,
+		g_free
+	},
+	[PROP_LOCATION] = {
+		"location",
+		G_TYPE_STRING,
+		offsetof(MicrolauncherInstance, location),
+		G_PARAM_READWRITE,
+		g_free
+	},
+	[PROP_JAVA_LOCATION] = {
+		"java-location",
+		G_TYPE_STRING,
+		offsetof(MicrolauncherInstance, javaLocation),
+		G_PARAM_READWRITE,
+		g_free
+	},
+	[PROP_ICON] = {
+		"icon",
+		G_TYPE_STRING,
+		offsetof(MicrolauncherInstance, icon),
+		G_PARAM_READWRITE,
+		g_free
+	},
+	[PROP_GAME_ARGS_LIST] = {
+		"game-args",
+		G_TYPE_POINTER,
+		offsetof(MicrolauncherInstance, extraGameArgs),
+		G_PARAM_READWRITE,
+		(GFreeFunc)g_slist_free
+	},
+	[PROP_JVM_ARGS_LIST] = {
+		"jvm-args",
+		G_TYPE_POINTER,
+		offsetof(MicrolauncherInstance, jvmArgs),
+		G_PARAM_READWRITE,
+		(GFreeFunc)g_slist_free
+	}
 };
+// clang-format on
 
 G_DEFINE_TYPE(MicrolauncherInstance, microlauncher_instance, G_TYPE_OBJECT)
 

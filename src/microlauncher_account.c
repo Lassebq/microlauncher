@@ -1,10 +1,10 @@
 #include <glib-object.h>
 #include <glib.h>
-#include <gobject_util.h>
 #include <microlauncher_account.h>
 #include <microlauncher_msa.h>
 #include <stdint.h>
-#include <util.h>
+#include <util/gobject_util.h>
+#include <util/util.h>
 
 enum {
 	PROP_NAME = 1,
@@ -18,18 +18,45 @@ enum {
 
 static GParamSpec *properties[N_PROPERTIES] = {NULL};
 
+// clang-format off
 static PropertyDef prop_definitions[N_PROPERTIES] = {
 	[PROP_NAME] = {
-				   "name",
-				   G_TYPE_STRING,
-				   offsetof(MicrolauncherAccount,								   name),
-				   G_PARAM_READWRITE,
-				   g_free																						 },
-	[PROP_TYPE] = {"type",		   G_TYPE_INT,	   offsetof(MicrolauncherAccount, type), G_PARAM_READWRITE, g_free},
-	[PROP_SESSION_UUID] = {"session-uuid", G_TYPE_STRING,  offsetof(MicrolauncherAccount, uuid), G_PARAM_READWRITE, g_free},
-	[PROP_ID] = {"id",		   G_TYPE_STRING,  offsetof(MicrolauncherAccount, id),	  G_PARAM_READWRITE, g_free},
-	[PROP_DATA] = {"data",		   G_TYPE_POINTER, offsetof(MicrolauncherAccount, data), G_PARAM_READWRITE, g_free}
+		"name",
+		G_TYPE_STRING,
+		offsetof(MicrolauncherAccount, name),
+		G_PARAM_READWRITE,
+		g_free
+	},
+	[PROP_TYPE] = {
+		"type",
+		G_TYPE_INT,
+		offsetof(MicrolauncherAccount, type),
+		G_PARAM_READWRITE,
+		g_free
+	},
+	[PROP_SESSION_UUID] = {
+		"session-uuid",
+		G_TYPE_STRING,
+		offsetof(MicrolauncherAccount, uuid),
+		G_PARAM_READWRITE,
+		g_free
+	},
+	[PROP_ID] = {
+		"id",
+		G_TYPE_STRING,
+		offsetof(MicrolauncherAccount, id),
+		G_PARAM_READWRITE,
+		g_free
+	},
+	[PROP_DATA] = {
+		"data",
+		G_TYPE_POINTER,
+		offsetof(MicrolauncherAccount, data),
+		G_PARAM_READWRITE,
+		g_free
+	}
 };
+// clang-format on
 
 G_DEFINE_TYPE(MicrolauncherAccount, microlauncher_account, G_TYPE_OBJECT)
 

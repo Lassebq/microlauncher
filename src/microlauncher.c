@@ -46,11 +46,10 @@ static bool use_saved_user = false;
 
 static GOptionEntry entries[] =
 	{
-		{"instance",	 'i', 0, G_OPTION_ARG_STRING, &active_instance, "Instance to launch",									  NULL},
-		{"user",		 'u', 0, G_OPTION_ARG_STRING, &active_user,		"Saved user GUID to authenticate as",					  NULL},
-		{"saved-user", 0,	  0, G_OPTION_ARG_NONE,	&use_saved_user,	 "Use saved user instead of explicitly specifying user", NULL},
-		G_OPTION_ENTRY_NULL
-};
+		{"instance", 'i', 0, G_OPTION_ARG_STRING, &active_instance, "Instance to launch", NULL},
+		{"user", 'u', 0, G_OPTION_ARG_STRING, &active_user, "Saved user GUID to authenticate as", NULL},
+		{"saved-user", 0, 0, G_OPTION_ARG_NONE, &use_saved_user, "Use saved user instead of explicitly specifying user", NULL},
+		G_OPTION_ENTRY_NULL};
 
 struct Callbacks callbacks;
 
@@ -997,15 +996,18 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 
 	c = 0;
 	char *argv[256];
-	argv[c++] = instance->javaLocation ? instance->javaLocation : "java"; /* Try java from path unless explicitly set */
-																		  // JVM args
+	/* TODO determine java automatically from javaVersion key */
+	argv[c++] = instance->javaLocation ? instance->javaLocation : "java";
+
+	// JVM args
 	if(json_object_is_type(argumentsJvm, json_type_array)) {
 		int k = add_arguments(argumentsJvm, replaces, features, argv + c, malloc_strs + m);
 		c += k;
 		m += k;
 	} else {
-		snprintf(path, PATH_MAX, "-Djava.library.path=%s", natives_dir);
-		argv[c++] = path;
+		str = g_strdup_printf("-Djava.library.path=%s", natives_dir);
+		malloc_strs[m++] = str;
+		argv[c++] = str;
 		argv[c++] = "-cp";
 		argv[c++] = cp;
 	}
