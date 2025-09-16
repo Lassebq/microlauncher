@@ -462,7 +462,7 @@ bool util_waitpid(GPid pid, int *exitcode) {
 }
 
 bool util_kill_process(GPid pid) {
-#ifdef __linux
+#if defined(__linux) || defined(__APPLE__)
 	return kill(pid, SIGKILL) == 0;
 #elif __WIN32
 	return TerminateProcess((HANDLE)pid, 0);
