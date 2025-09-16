@@ -18,7 +18,7 @@ set(SOURCES
   src/gobject_util.c
 )
 if(WIN32)
-    list(APPEND SOURCES util.cpp)
+    list(APPEND SOURCES src/util.cpp)
 endif()
 
 find_package(PkgConfig REQUIRED)
@@ -67,7 +67,7 @@ if(${USE_MOJANG_MANIFEST})
 endif()
 target_link_directories(microlauncher PRIVATE ${PKGCONF_LIBRARY_DIRS})
 target_link_libraries(microlauncher PRIVATE ${PKGCONF_LIBRARIES} m)
-target_include_directories(microlauncher PRIVATE ${PKGCONF_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/include/util)
+target_include_directories(microlauncher PRIVATE ${PKGCONF_INCLUDE_DIRS} ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BUILD_DIR})
 
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/io.github.lassebq.microlauncher.desktop" DESTINATION share/applications)

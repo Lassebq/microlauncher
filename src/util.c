@@ -16,7 +16,7 @@
 #include <openssl/sha.h>
 #include <stdbool.h>
 #include <string.h>
-#include <util.h>
+#include <util/util.h>
 #include <zip.h>
 
 String string_new_n(int n) {

@@ -1,6 +1,6 @@
 #include <glib-object.h>
 #include <glibconfig.h>
-#include <gobject_util.h>
+#include <util/gobject_util.h>
 #include <stdio.h>
 #include <util/util.h>
 

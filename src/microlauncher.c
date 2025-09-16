@@ -998,7 +998,8 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	c = 0;
 	char *argv[256];
 	argv[c++] = instance->javaLocation ? instance->javaLocation : "java"; /* Try java from path unless explicitly set */
-																		  // JVM args
+
+	// JVM args
 	if(json_object_is_type(argumentsJvm, json_type_array)) {
 		int k = add_arguments(argumentsJvm, replaces, features, argv + c, malloc_strs + m);
 		c += k;

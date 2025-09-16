@@ -6,7 +6,7 @@
 #include <microlauncher.h>
 #include <microlauncher_msa.h>
 #include <stdlib.h>
-#include <util.h>
+#include <util/util.h>
 #include <util/json_util.h>
 
 bool microlauncher_msa_xboxlive_auth(struct MicrosoftUser *user) {

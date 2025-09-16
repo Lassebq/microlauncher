@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
-#include <util.h>
+#include <util/util.h>
 
 int32_t json_get_int(json_object *obj, const char *key) {
 	json_object *val = json_object_object_get(obj, key);

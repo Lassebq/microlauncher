@@ -4,7 +4,7 @@
 #include <glib-object.h>
 #include <glib.h>
 #include <gtk/gtk.h>
-#include <gtk_util.h>
+#include <util/gtk_util.h>
 #include <json_object.h>
 #include <json_types.h>
 #include <microlauncher.h>
@@ -31,6 +31,10 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#ifdef __linux
+#include <linux/limits.h>
+#endif
 
 #define APPID "io.github.lassebq.microlauncher"
 
