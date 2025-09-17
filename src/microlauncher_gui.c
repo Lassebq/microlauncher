@@ -1741,6 +1741,10 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	gtk_window_set_default_size(window, 0, 480);
 	gtk_window_set_title(window, LAUNCHER_NAME " " LAUNCHER_VERSION " - Minecraft Launcher");
 
+	GSimpleAction *quit_action = g_simple_action_new("quit", NULL);
+	g_signal_connect_swapped(quit_action, "activate", G_CALLBACK(gtk_window_close), window);
+	g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(quit_action));
+
 	box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 	gtk_window_set_child(window, box);
 
@@ -1806,10 +1810,6 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	gtk_check_button_set_active(checkDemo, settings->demo);
 
 	microlauncher_set_callbacks(callbacks);
-	GSimpleAction *quit_action = g_simple_action_new("quit", NULL);
-	g_signal_connect_swapped(quit_action, "activate", G_CALLBACK(gtk_window_close), window);
-	g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(quit_action));
-	gtk_application_set_accels_for_action(app, "app.quit", (const char *[]){"<Primary>q", NULL});
 	g_signal_connect(window, "close-request", G_CALLBACK(close_request), NULL);
 	gtk_window_set_focus(window, GTK_WIDGET(playButton));
 	gtk_window_present(window);
@@ -1823,6 +1823,9 @@ int microlauncher_gui_show(void) {
 	init_gpus();
 
 	app = gtk_application_new(APPID, G_APPLICATION_NON_UNIQUE);
+
+	// Mapped as Ctrl + Q on Win and Linux but Command + Q on Mac. Specifically when called in main
+	gtk_application_set_accels_for_action(app, "app.quit", (const char *[]){"<Control>q", NULL});
 	g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
 	status = g_application_run(G_APPLICATION(app), argc, argv);
 	g_object_unref(app);
