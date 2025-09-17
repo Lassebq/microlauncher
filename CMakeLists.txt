@@ -56,7 +56,7 @@ endif()
 
 add_executable(microlauncher WIN32 ${SOURCES})
 if(${CMAKE_C_COMPILER_ID} STREQUAL GNU)
-    target_compile_options(microlauncher PUBLIC -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type -Werror -Wno-deprecated-declarations)
+    target_compile_options(microlauncher PUBLIC -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type)
 endif()
 
 target_compile_definitions(microlauncher PRIVATE

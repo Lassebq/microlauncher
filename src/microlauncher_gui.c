@@ -138,8 +138,12 @@ static void bind_column_cb(GtkSignalListItemFactory *factory, GtkListItem *listi
 	g_object_bind_property(item, userdata, label, "label", G_BINDING_SYNC_CREATE);
 }
 
-static void select_instance_directory(GtkFileDialog *dialog, GAsyncResult *res, gpointer data) {
-	GtkEntry *entry = GTK_ENTRY(data);
+struct SelectDialog {
+	GtkEntry *entry;
+	GtkWindow *parent;
+};
+
+static void select_instance_directory(GtkFileDialog *dialog, GAsyncResult *res, GtkEntry *entry) {
 	GFile *file = gtk_file_dialog_select_folder_finish(dialog, res, NULL);
 	if(file) {
 		gtk_entry_set_text(entry, g_file_peek_path(file));
@@ -147,35 +151,35 @@ static void select_instance_directory(GtkFileDialog *dialog, GAsyncResult *res, 
 	}
 }
 
-static void select_instance_dir_event(GtkButton *button, gpointer user_data) {
-	GtkEntry *entry = GTK_ENTRY(user_data);
+static void select_instance_dir_event(GtkButton *button, struct SelectDialog *data) {
+	GtkEntry *entry = data->entry;
 	GtkFileDialog *dialog = gtk_file_dialog_new();
 	GFile *file = g_file_new_for_path(gtk_entry_get_text(entry));
 	if(file && g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) == G_FILE_TYPE_DIRECTORY) {
 		gtk_file_dialog_set_initial_folder(dialog, file);
 	}
-	gtk_file_dialog_select_folder(dialog, window, NULL, (GAsyncReadyCallback)select_instance_directory, entry);
+	gtk_file_dialog_select_folder(dialog, data->parent, NULL, (GAsyncReadyCallback)select_instance_directory, entry);
 	g_object_unref(file);
 }
 
-static void select_instance_java(GtkFileDialog *dialog, GAsyncResult *res, gpointer data) {
-	GtkEntry *entry = GTK_ENTRY(data);
+static void select_instance_java(GtkFileDialog *dialog, GAsyncResult *res, GtkEntry *entry) {
 	GFile *file = gtk_file_dialog_open_finish(dialog, res, NULL);
 	if(file) {
 		gtk_entry_set_text(entry, g_file_peek_path(file));
+		g_object_unref(file);
 	}
-	g_object_unref(file);
 }
 
-static void select_instance_java_event(GtkButton *button, gpointer user_data) {
-	GtkEntry *entry = GTK_ENTRY(user_data);
+static void select_instance_java_event(GtkButton *button, struct SelectDialog *data) {
+	GtkEntry *entry = data->entry;
 	GtkFileDialog *dialog = gtk_file_dialog_new();
 	GFile *file = g_file_new_for_path(gtk_entry_get_text(entry));
 	if(file && g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) == G_FILE_TYPE_REGULAR) {
 		gtk_file_dialog_set_initial_file(dialog, file);
 	}
-	gtk_file_dialog_open(dialog, window, NULL, (GAsyncReadyCallback)select_instance_java, entry);
-	g_object_unref(file);
+	gtk_file_dialog_open(dialog, data->parent, NULL, (GAsyncReadyCallback)select_instance_java, entry);
+	if(file)
+		g_object_unref(file);
 }
 
 static void select_instance_icon(GtkFileDialog *dialog, GAsyncResult *res, gpointer data) {
@@ -385,7 +389,11 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	GtkBox *container = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10));
 	gtk_box_append(container, widget);
 	widget = gtk_button_new_with_label("Select");
-	g_signal_connect(widget, "clicked", G_CALLBACK(select_instance_dir_event), entry);
+
+	struct SelectDialog *select = g_new(struct SelectDialog, 1);
+	select->entry = entry;
+	select->parent = newWindow;
+	g_signal_connect_data(widget, "clicked", G_CALLBACK(select_instance_dir_event), select, (GClosureNotify)g_free, 0);
 	gtk_box_append(container, widget);
 	gtk_grid_attach(grid, GTK_WIDGET(container), 2, row++, 1, 1);
 
@@ -403,7 +411,11 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	container = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10));
 	gtk_box_append(container, widget);
 	widget = gtk_button_new_with_label("Select");
-	g_signal_connect(widget, "clicked", G_CALLBACK(select_instance_java_event), entry);
+
+	select = g_new(struct SelectDialog, 1);
+	select->entry = entry;
+	select->parent = newWindow;
+	g_signal_connect_data(widget, "clicked", G_CALLBACK(select_instance_java_event), select, (GClosureNotify)g_free, 0);
 	gtk_box_append(container, widget);
 	gtk_grid_attach(grid, GTK_WIDGET(container), 2, row++, 1, 1);
 
@@ -1243,6 +1255,11 @@ static gboolean add_account_in_main(MicrolauncherAccount *user) {
 	return false;
 }
 
+static gboolean close_window(GtkWindow *window) {
+	gtk_window_close(window);
+	return false;
+}
+
 static void check_device_code(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable) {
 	struct DeviceCodeOAuthResponse *response = (struct DeviceCodeOAuthResponse *)task_data;
 	if(!response || !response->device_code) {
@@ -1257,7 +1274,7 @@ static void check_device_code(GTask *task, gpointer source_object, gpointer task
 	} else if(result == 0) {
 		MicrolauncherAccount *user = microlauncher_account_new(NULL, ACCOUNT_TYPE_MSA);
 		microlauncher_account_set_userdata(user, userdata);
-		g_idle_add(G_SOURCE_FUNC(gtk_window_close), popupWindow);
+		g_idle_add(G_SOURCE_FUNC(close_window), GTK_WINDOW(popupWindow));
 		if(microlauncher_auth_user(user, NULL)) {
 			g_idle_add(G_SOURCE_FUNC(add_account_in_main), user);
 		} else {
@@ -1789,7 +1806,10 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	gtk_check_button_set_active(checkDemo, settings->demo);
 
 	microlauncher_set_callbacks(callbacks);
-
+	GSimpleAction *quit_action = g_simple_action_new("quit", NULL);
+	g_signal_connect_swapped(quit_action, "activate", G_CALLBACK(gtk_window_close), window);
+	g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(quit_action));
+	gtk_application_set_accels_for_action(app, "app.quit", (const char *[]){"<Primary>q", NULL});
 	g_signal_connect(window, "close-request", G_CALLBACK(close_request), NULL);
 	gtk_window_set_focus(window, GTK_WIDGET(playButton));
 	gtk_window_present(window);

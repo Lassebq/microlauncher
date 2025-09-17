@@ -5,7 +5,7 @@
 #include <shlguid.h>
 #include <shlobj.h>
 #include <shobjidl.h>
-#include <util.h>
+#include <util/util.h>
 #include <windows.h>
 #include <winnls.h>
 

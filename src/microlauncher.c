@@ -1064,9 +1064,11 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	for(int i = 0; i < c; i++) {
 		g_print("%s\n", argv[i]);
 	}
+#ifdef __unix
 	if(settings.gpu_id) {
 		setenv("DRI_PRIME", settings.gpu_id, true);
 	}
+#endif
 	GPid pid = util_fork_execv(instance->location, argv);
 
 	run_callback(instance_started, pid);
