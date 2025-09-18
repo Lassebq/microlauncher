@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <util/json_util.h>
 #include <util/util.h>
+#include <inttypes.h>
 
 bool microlauncher_msa_xboxlive_auth(struct MicrosoftUser *user) {
 	time_t tm;
@@ -104,7 +105,7 @@ bool microlauncher_msa_xboxlive_xsts(struct MicrosoftUser *user, char **error_me
 				break;
 		}
 
-		*error_message = g_strdup_printf("Xbox Error %ld: %s", xerr, msg);
+		*error_message = g_strdup_printf("Xbox Error %" PRId64 ": %s", xerr, msg);
 		return false;
 	}
 	user->xsts_token = g_strdup(str);

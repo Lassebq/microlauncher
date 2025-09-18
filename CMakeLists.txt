@@ -54,10 +54,51 @@ if(WIN32)
     set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/icon.rc" APPEND PROPERTY OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/icon.ico")
 endif()
 
-add_executable(microlauncher WIN32 ${SOURCES})
+# Generate app icon from render_1024x1024.png in assets
+if(APPLE)
+    find_program(ICONUTIL "iconutil")
+
+    set(ICON_SRC ${CMAKE_SOURCE_DIR}/assets/render_1024x1024.png)
+    set(ICONSET_DIR ${CMAKE_BINARY_DIR}/app_icon.iconset)
+    set(ICON_OUT ${CMAKE_BINARY_DIR}/app_icon.icns)
+    
+    add_custom_command(
+        OUTPUT ${ICON_OUT}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${ICONSET_DIR}
+        COMMAND sips -z 16 16     ${ICON_SRC} --out ${ICONSET_DIR}/icon_16x16.png
+        COMMAND sips -z 32 32     ${ICON_SRC} --out ${ICONSET_DIR}/icon_16x16@2x.png
+        COMMAND sips -z 32 32     ${ICON_SRC} --out ${ICONSET_DIR}/icon_32x32.png
+        COMMAND sips -z 64 64     ${ICON_SRC} --out ${ICONSET_DIR}/icon_32x32@2x.png
+        COMMAND sips -z 128 128   ${ICON_SRC} --out ${ICONSET_DIR}/icon_128x128.png
+        COMMAND sips -z 256 256   ${ICON_SRC} --out ${ICONSET_DIR}/icon_128x128@2x.png
+        COMMAND sips -z 256 256   ${ICON_SRC} --out ${ICONSET_DIR}/icon_256x256.png
+        COMMAND sips -z 512 512   ${ICON_SRC} --out ${ICONSET_DIR}/icon_256x256@2x.png
+        COMMAND sips -z 512 512   ${ICON_SRC} --out ${ICONSET_DIR}/icon_512x512.png
+        COMMAND ${CMAKE_COMMAND} -E copy ${ICON_SRC} ${ICONSET_DIR}/icon_512x512@2x.png
+        COMMAND iconutil -c icns ${ICONSET_DIR} -o ${ICON_OUT}
+        DEPENDS ${ICON_SRC}
+        COMMENT "Generating macOS .icns icon"
+    )
+
+    add_custom_target(icons ALL DEPENDS ${ICON_OUT})
+endif()
+
+set_source_files_properties(${ICON_OUT} PROPERTIES
+    MACOSX_PACKAGE_LOCATION "Resources"
+)
+
+add_executable(microlauncher WIN32 MACOSX_BUNDLE ${ICON_OUT} ${SOURCES})
 if(${CMAKE_C_COMPILER_ID} STREQUAL GNU)
     target_compile_options(microlauncher PUBLIC -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type)
 endif()
+
+set_target_properties(microlauncher PROPERTIES MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/Info.plist.in)
+
+set_target_properties(microlauncher PROPERTIES 
+    MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.lassebq.microlauncher"
+    MACOSX_BUNDLE_BUNDLE_NAME "MicroLauncher"
+    MACOSX_BUNDLE_ICON_FILE "app_icon"
+)
 
 target_compile_definitions(microlauncher PRIVATE
     MICROSOFT_CLIENT_ID=\"${MICROSOFT_CLIENT_ID}\"
@@ -72,7 +113,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BUILD_DIR})
 
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/io.github.lassebq.microlauncher.desktop" DESTINATION share/applications)
 
-install(TARGETS microlauncher TYPE RUNTIME)
+install(TARGETS microlauncher BUNDLE DESTINATION . TYPE RUNTIME)
 if(WIN32)
     install(CODE "set(CMAKE_SYSTEM_LIBRARY_PATH \"${CMAKE_SYSTEM_LIBRARY_PATH}\")")
     
