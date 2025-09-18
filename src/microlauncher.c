@@ -865,7 +865,7 @@ static char *apply_replaces(const char *const *replaces, const char *str) {
 }
 
 static int add_arguments(json_object *array, const char *const *replaces, GSList *features, char **argv, char **str_to_free) {
-	json_object *iter;
+	json_object *iter, *iter2;
 
 	size_t len = json_object_array_length(array);
 	int j = 0;
@@ -874,8 +874,20 @@ static int add_arguments(json_object *array, const char *const *replaces, GSList
 		switch(json_object_get_type(iter)) {
 			case json_type_object:
 				if(check_rules(json_object_object_get(iter, "rules"), features)) {
-					argv[j] = str_to_free[j] = apply_replaces(replaces, json_get_string(iter, "value"));
-					j++;
+					json_object *obj = json_object_object_get(iter, "value");
+					if(json_object_is_type(obj, json_type_string)) {
+						argv[j] = str_to_free[j] = apply_replaces(replaces, json_object_get_string(obj));
+						j++;
+					} else if(json_object_is_type(obj, json_type_array)) {
+						size_t len2 = json_object_array_length(obj);
+						for(size_t k = 0; k < len2; k++) {
+							iter2 = json_object_array_get_idx(obj, k);
+							if(json_object_is_type(iter2, json_type_string)) {
+								argv[j] = str_to_free[j] = apply_replaces(replaces, json_object_get_string(iter2));
+								j++;
+							}
+						}
+					}
 				}
 				break;
 			case json_type_string:
