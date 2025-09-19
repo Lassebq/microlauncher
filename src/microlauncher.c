@@ -963,7 +963,7 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	g_value_init(&val, G_TYPE_STRING);
 	g_object_get_property(G_OBJECT(user), "access-token", &val);
 	const char *auth_token = g_value_get_string(&val);
-	g_object_get_property(G_OBJECT(user), "uuid", &val);
+	g_object_get_property(G_OBJECT(user), "session-uuid", &val);
 	const char *valstr = g_value_get_string(&val);
 	char *auth_session = g_strdup_printf("token:%s:%s", auth_token ? auth_token : "", valstr ? valstr : "");
 	malloc_strs[m++] = auth_session;

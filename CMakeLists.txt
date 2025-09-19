@@ -32,73 +32,84 @@ endif()
 pkg_check_modules(PKGCONF REQUIRED ${DEPS})
 
 set(ICON_RES 48 64 128 256 512)
+set(ICON_SRC ${CMAKE_CURRENT_SOURCE_DIR}/assets/render_1024x1024.png)
+set(ICONS_DIR ${CMAKE_CURRENT_BINARY_DIR}/icon)
+if(APPLE)
+    set(ICON_OUT ${CMAKE_CURRENT_BINARY_DIR}/icon.icns)
+elseif(WIN32)
+    set(ICON_OUT ${CMAKE_CURRENT_BINARY_DIR}/icon.ico)
+endif()
+# if(APPLE)
+#     set(ICONS_DIR ${CMAKE_CURRENT_BINARY_DIR}/icon.iconset)
+# endif()
+
+# find_package(ImageMagick COMPONENTS convert)
+find_program(MAGICK NAMES "magick" "magick.exe")
+find_program(ICOTOOl NAMES "icotool" "icotool.exe")
+if(APPLE)
+    if(NOT MAGICK) # Fall back to Apple's scriptable image processing system
+        find_program(SIPS sips)
+    endif()
+    find_program(ICONUTIL "iconutil")
+endif()
 
 foreach(res IN LISTS ICON_RES)
-    list(APPEND ICON_PNGS "${CMAKE_CURRENT_SOURCE_DIR}/assets/scaled_${res}x${res}.png")
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/assets/scaled_${res}x${res}.png" DESTINATION "share/icons/hicolor/${res}x${res}/apps" RENAME "io.github.lassebq.microlauncher.png")
+    list(APPEND ICON_PNGS "${ICONS_DIR}/icon_${res}x${res}.png")
+    if(MAGICK)
+        add_custom_command(
+            OUTPUT "${ICONS_DIR}/icon_${res}x${res}.png"
+            COMMAND ${MAGICK} ${ICON_SRC} -filter Catrom -resize "${res}x${res}" "${ICONS_DIR}/icon_${res}x${res}.png"
+            DEPENDS ${ICON_SRC}
+        )
+    elseif(SIPS)
+        add_custom_command(
+            OUTPUT "${ICONS_DIR}/icon_${res}x${res}.png"
+            COMMAND ${SIPS} -z ${res} ${res} ${ICON_SRC} --out "${ICONS_DIR}/icon_${res}x${res}.png"
+            DEPENDS ${ICON_SRC}
+        )
+    endif()
+
+    install(FILES "${ICONS_DIR}/icon_${res}x${res}.png" DESTINATION "share/icons/hicolor/${res}x${res}/apps" RENAME "io.github.lassebq.microlauncher.png")
 endforeach()
 
+file(MAKE_DIRECTORY ${ICONS_DIR})
 if(WIN32)
-    # Just in case we're cross compiling and have native executable in build environment
-    find_program(ICOTOOl "icotool")
-    if(NOT ICOTOOl)
-        find_program(ICOTOOl "icotool.exe")
-    endif()
     add_custom_command(
-        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/icon.ico"
-        COMMAND ${ICOTOOl} -c ${ICON_PNGS} -o "${CMAKE_CURRENT_BINARY_DIR}/icon.ico"
+        OUTPUT ${ICON_OUT}
+        COMMAND ${ICOTOOl} -c ${ICON_PNGS} -o ${ICON_OUT}
         DEPENDS ${ICON_PNGS} 
     )
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/icon.rc" [[IDI_ICON1 ICON "icon.ico"]])
     list(APPEND SOURCES "${CMAKE_CURRENT_BINARY_DIR}/icon.rc")
-    set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/icon.rc" APPEND PROPERTY OBJECT_DEPENDS "${CMAKE_CURRENT_BINARY_DIR}/icon.ico")
-endif()
-
-# Generate app icon from render_1024x1024.png in assets
-if(APPLE)
-    find_program(ICONUTIL "iconutil")
-
-    set(ICON_SRC ${CMAKE_SOURCE_DIR}/assets/render_1024x1024.png)
-    set(ICONSET_DIR ${CMAKE_BINARY_DIR}/app_icon.iconset)
-    set(ICON_OUT ${CMAKE_BINARY_DIR}/app_icon.icns)
-    
+    set_property(SOURCE "${CMAKE_CURRENT_BINARY_DIR}/icon.rc" APPEND PROPERTY OBJECT_DEPENDS ${ICON_OUT})
+elseif(APPLE)
     add_custom_command(
         OUTPUT ${ICON_OUT}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${ICONSET_DIR}
-        COMMAND sips -z 16 16     ${ICON_SRC} --out ${ICONSET_DIR}/icon_16x16.png
-        COMMAND sips -z 32 32     ${ICON_SRC} --out ${ICONSET_DIR}/icon_16x16@2x.png
-        COMMAND sips -z 32 32     ${ICON_SRC} --out ${ICONSET_DIR}/icon_32x32.png
-        COMMAND sips -z 64 64     ${ICON_SRC} --out ${ICONSET_DIR}/icon_32x32@2x.png
-        COMMAND sips -z 128 128   ${ICON_SRC} --out ${ICONSET_DIR}/icon_128x128.png
-        COMMAND sips -z 256 256   ${ICON_SRC} --out ${ICONSET_DIR}/icon_128x128@2x.png
-        COMMAND sips -z 256 256   ${ICON_SRC} --out ${ICONSET_DIR}/icon_256x256.png
-        COMMAND sips -z 512 512   ${ICON_SRC} --out ${ICONSET_DIR}/icon_256x256@2x.png
-        COMMAND sips -z 512 512   ${ICON_SRC} --out ${ICONSET_DIR}/icon_512x512.png
-        COMMAND ${CMAKE_COMMAND} -E copy ${ICON_SRC} ${ICONSET_DIR}/icon_512x512@2x.png
-        COMMAND iconutil -c icns ${ICONSET_DIR} -o ${ICON_OUT}
-        DEPENDS ${ICON_SRC}
-        COMMENT "Generating macOS .icns icon"
+        COMMAND ${ICONUTIL} -c icns ${ICONS_DIR} -o ${ICON_OUT}
+        DEPENDS ${ICON_PNGS} 
     )
-
-    add_custom_target(icons ALL DEPENDS ${ICON_OUT})
+    list(APPEND SOURCES "${ICON_OUT}")
 endif()
 
-set_source_files_properties(${ICON_OUT} PROPERTIES
-    MACOSX_PACKAGE_LOCATION "Resources"
-)
+# add_custom_target(icons ALL DEPENDS ${ICON_OUT})
+if(APPLE)
+    set_source_files_properties(${ICON_OUT} PROPERTIES
+        MACOSX_PACKAGE_LOCATION "Resources"
+    )
 
-add_executable(microlauncher WIN32 MACOSX_BUNDLE ${ICON_OUT} ${SOURCES})
+    set_target_properties(microlauncher PROPERTIES MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/Info.plist.in)
+
+    set_target_properties(microlauncher PROPERTIES 
+        MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.lassebq.microlauncher"
+        MACOSX_BUNDLE_BUNDLE_NAME "MicroLauncher"
+        MACOSX_BUNDLE_ICON_FILE "app_icon"
+    )
+endif()
+
+add_executable(microlauncher WIN32 MACOSX_BUNDLE ${SOURCES})
 if(${CMAKE_C_COMPILER_ID} STREQUAL GNU)
     target_compile_options(microlauncher PUBLIC -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type)
 endif()
-
-set_target_properties(microlauncher PROPERTIES MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/Info.plist.in)
-
-set_target_properties(microlauncher PROPERTIES 
-    MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.lassebq.microlauncher"
-    MACOSX_BUNDLE_BUNDLE_NAME "MicroLauncher"
-    MACOSX_BUNDLE_ICON_FILE "app_icon"
-)
 
 target_compile_definitions(microlauncher PRIVATE
     MICROSOFT_CLIENT_ID=\"${MICROSOFT_CLIENT_ID}\"
