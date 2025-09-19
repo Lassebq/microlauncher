@@ -12,6 +12,8 @@
         <string>6.0</string>
         <key>CFBundleName</key>
         <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
+        <key>CFBundleDisplayName</key>
+        <string>${MACOSX_BUNDLE_BUNDLE_NAME}</string>
         <key>CFBundleIconFile</key>
         <string>${MACOSX_BUNDLE_ICON_FILE}</string>
         <key>CFBundlePackageType</key>

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.31.0)
-project(microlauncher VERSION 1.0.0 LANGUAGES C CXX)
+project(MicroLauncher VERSION 1.0.0 LANGUAGES C CXX)
 
 set(MICROSOFT_CLIENT_ID "95984717-05f1-4b52-8a66-064d0e1e5b55" CACHE STRING "Azure application client ID used for microsoft authentication")
 option(USE_MOJANG_MANIFEST "Uses official mojang manifest without tweaked client JSONs" OFF)
@@ -36,15 +36,12 @@ set(ICON_SRC ${CMAKE_CURRENT_SOURCE_DIR}/assets/render_1024x1024.png)
 set(ICONS_DIR ${CMAKE_CURRENT_BINARY_DIR}/icon)
 if(APPLE)
     set(ICON_OUT ${CMAKE_CURRENT_BINARY_DIR}/icon.icns)
+    set(ICONS_DIR ${CMAKE_CURRENT_BINARY_DIR}/icon.iconset)
 elseif(WIN32)
     set(ICON_OUT ${CMAKE_CURRENT_BINARY_DIR}/icon.ico)
 endif()
-# if(APPLE)
-#     set(ICONS_DIR ${CMAKE_CURRENT_BINARY_DIR}/icon.iconset)
-# endif()
 
-# find_package(ImageMagick COMPONENTS convert)
-find_program(MAGICK NAMES "magick" "magick.exe")
+find_program(MAGICK NAMES "magick" "convert" "magick.exe" "convert.exe")
 find_program(ICOTOOl NAMES "icotool" "icotool.exe")
 if(APPLE)
     if(NOT MAGICK) # Fall back to Apple's scriptable image processing system
@@ -53,6 +50,7 @@ if(APPLE)
     find_program(ICONUTIL "iconutil")
 endif()
 
+file(MAKE_DIRECTORY ${ICONS_DIR})
 foreach(res IN LISTS ICON_RES)
     list(APPEND ICON_PNGS "${ICONS_DIR}/icon_${res}x${res}.png")
     if(MAGICK)
@@ -72,7 +70,6 @@ foreach(res IN LISTS ICON_RES)
     install(FILES "${ICONS_DIR}/icon_${res}x${res}.png" DESTINATION "share/icons/hicolor/${res}x${res}/apps" RENAME "io.github.lassebq.microlauncher.png")
 endforeach()
 
-file(MAKE_DIRECTORY ${ICONS_DIR})
 if(WIN32)
     add_custom_command(
         OUTPUT ${ICON_OUT}
@@ -96,17 +93,19 @@ if(APPLE)
     set_source_files_properties(${ICON_OUT} PROPERTIES
         MACOSX_PACKAGE_LOCATION "Resources"
     )
-
-    set_target_properties(microlauncher PROPERTIES MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/Info.plist.in)
-
-    set_target_properties(microlauncher PROPERTIES 
-        MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.lassebq.microlauncher"
-        MACOSX_BUNDLE_BUNDLE_NAME "MicroLauncher"
-        MACOSX_BUNDLE_ICON_FILE "app_icon"
-    )
 endif()
 
 add_executable(microlauncher WIN32 MACOSX_BUNDLE ${SOURCES})
+
+if(APPLE)
+    set_target_properties(microlauncher PROPERTIES
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_SOURCE_DIR}/Info.plist.in
+        MACOSX_BUNDLE_GUI_IDENTIFIER "io.github.lassebq.microlauncher"
+        MACOSX_BUNDLE_BUNDLE_NAME "MicroLauncher"
+        MACOSX_BUNDLE_ICON_FILE "icon"
+    )
+endif()
+
 if(${CMAKE_C_COMPILER_ID} STREQUAL GNU)
     target_compile_options(microlauncher PUBLIC -Wall -Wextra -Wno-unused-parameter -Wno-cast-function-type)
 endif()
