@@ -463,9 +463,11 @@ bool util_waitpid(GPid pid, int *exitcode) {
 }
 
 bool util_kill_process(GPid pid) {
-#ifdef __linux
+#ifdef G_OS_UNIX
 	return kill(pid, SIGKILL) == 0;
-#elif __WIN32
+#elif G_OS_WIN32
 	return TerminateProcess((HANDLE)pid, 0);
+#else
+	#error Not implemented
 #endif
 }

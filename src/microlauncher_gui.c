@@ -20,7 +20,7 @@
 #include <shlobj.h>
 #include <windows.h>
 #endif
-#ifdef __unix
+#if defined(G_OS_UNIX) && !defined(__APPLE__)
 #include <pci/pci.h>
 #endif
 #include <math.h>
