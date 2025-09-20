@@ -962,11 +962,15 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	GValue val = G_VALUE_INIT;
 	g_value_init(&val, G_TYPE_STRING);
 	g_object_get_property(G_OBJECT(user), "access-token", &val);
-	const char *auth_token = g_value_get_string(&val);
+	char *auth_token = g_strdup(g_value_get_string(&val));
+	malloc_strs[m++] = auth_token;
+
 	g_object_get_property(G_OBJECT(user), "session-uuid", &val);
-	const char *valstr = g_value_get_string(&val);
-	char *auth_session = g_strdup_printf("token:%s:%s", auth_token ? auth_token : "", valstr ? valstr : "");
+	char *auth_uuid = g_strdup(g_value_get_string(&val));
+	malloc_strs[m++] = auth_uuid;
+	char *auth_session = g_strdup_printf("token:%s:%s", auth_token ? auth_token : "", auth_uuid ? auth_uuid : "");
 	malloc_strs[m++] = auth_session;
+	
 	char width_str[11];
 	snprintf(width_str, sizeof(width_str), "%d", settings.width);
 	char height_str[11];
@@ -975,7 +979,7 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	const char *replaces[] = {
 		"${auth_player_name}", user->name,
 		"${auth_session}", auth_session,
-		"${auth_uuid}", valstr,
+		"${auth_uuid}", auth_uuid,
 		"${auth_xuid}", "0",
 		"${clientid}", "-",
 		"${version_name}", id,
