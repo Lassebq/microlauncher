@@ -85,7 +85,7 @@ static void microlauncher_version_item_class_init(VersionItemClass *klass) {
 }
 
 VersionItem *microlauncher_version_item_new(const char *version, const char *type, const char *releaseTime) {
-	VersionItem *self = g_object_new(MICROLAUNCHER_VERSION_ITEM_TYPE, NULL);
+	VersionItem *self = g_object_new(microlauncher_version_item_get_type(), NULL);
 	self->version = g_strdup(version);
 	self->type = g_strdup(type);
 	self->releaseTime = g_strdup(releaseTime);

@@ -11,6 +11,7 @@ set(SOURCES
   src/microlauncher_instance.c
   src/microlauncher_account.c
   src/microlauncher_version_item.c
+  src/microlauncher_java_runtime.c
   src/xdgutil.c
   src/util.c
   src/json_util.c

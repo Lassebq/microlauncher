@@ -22,6 +22,7 @@ extern char *EXEC_BINARY;
 struct Settings {
 	MicrolauncherAccount *user;
 	MicrolauncherInstance *instance;
+	GSList *javaRuntimes;
 	int width;
 	int height;
 	bool fullscreen;

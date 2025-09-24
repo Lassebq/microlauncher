@@ -15,7 +15,6 @@ struct _MicrolauncherInstance {
 	GSList *jvmArgs;
 };
 
-#define MICROLAUNCHER_INSTANCE_TYPE (microlauncher_instance_get_type())
 G_DECLARE_FINAL_TYPE(MicrolauncherInstance, microlauncher_instance, MICROLAUNCHER, INSTANCE, GObject);
 
 MicrolauncherInstance *microlauncher_instance_clone(MicrolauncherInstance *inst);

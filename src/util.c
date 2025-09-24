@@ -1,14 +1,11 @@
 #include <glib.h>
 #include <glib/gstdio.h>
-#ifdef __linux
-#include <linux/limits.h>
-#endif
-#if defined(__unix) || defined(__APPLE__)
+#ifdef G_OS_UNIX
 #include <sys/wait.h>
 #include <unistd.h>
 #include <uuid/uuid.h>
 #endif
-#ifdef __WIN32
+#ifdef G_OS_WIN32
 #include <processthreadsapi.h>
 #include <windows.h>
 #include <winscard.h>
@@ -212,6 +209,16 @@ void get_sha1(FILE *fd, char *hash) {
 	hash[SHA_DIGEST_LENGTH * 2] = '\0';
 }
 
+bool str_ends_with(const char *str, const char *suffix) {
+	if(!str || !suffix)
+		return false;
+	size_t lenstr = strlen(str);
+	size_t lensuffix = strlen(suffix);
+	if(lensuffix > lenstr)
+		return false;
+	return strncmp(str + lenstr - lensuffix, suffix, lensuffix) == 0;
+}
+
 int strsplit(char *src, char delim, char **dest, int max) {
 	char *s;
 	char *str = src;
@@ -285,7 +292,7 @@ const char *util_basename(const char *path) {
 char *random_uuid(void) {
 	char *str = malloc(37);
 	uuid_t uuid;
-#ifdef _WIN32
+#ifdef G_OS_WIN32
 	OLECHAR widestr[39];
 	CoCreateGuid(&uuid);
 	StringFromGUID2(&uuid, widestr, 39); // "{xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx}"
@@ -415,11 +422,53 @@ char **get_commandv(char *cmdline) {
 	return heap;
 }
 
+char *util_str_execv(const char *dir, char *const *argv) {
+	String str;
+	int pipefd[2];
+	if(pipe(pipefd) == -1) {
+		return NULL;
+	}
+
+#ifndef G_OS_WIN32
+	GPid pid = fork();
+	if(pid == -1) {
+		close(pipefd[0]);
+		close(pipefd[1]);
+		return NULL;
+	}
+	if(pid == 0) {
+		close(pipefd[0]);
+		dup2(pipefd[1], STDOUT_FILENO);
+		dup2(pipefd[1], STDERR_FILENO);
+		close(pipefd[1]);
+
+		if(dir) {
+			chdir(dir);
+		}
+		execvp(argv[0], argv);
+		_exit(EXIT_FAILURE);
+	}
+	close(pipefd[1]);
+
+	char buffer[BUFSIZ];
+	ssize_t bytes_read;
+
+	str = string_new(NULL);
+	while((bytes_read = read(pipefd[0], buffer, sizeof(buffer))) > 0) {
+		string_append_n(&str, buffer, bytes_read);
+	}
+	close(pipefd[0]);
+	return str.data;
+#endif
+}
+
 GPid util_fork_execv(const char *dir, char *const *argv) {
-#ifndef _WIN32
+#ifndef G_OS_WIN32
 	GPid pid = fork();
 	if(pid == 0) {
-		chdir(dir);
+		if(dir) {
+			chdir(dir);
+		}
 		execvp(argv[0], argv);
 		_exit(EXIT_FAILURE);
 	}
@@ -438,7 +487,7 @@ GPid util_fork_execv(const char *dir, char *const *argv) {
 }
 
 bool util_waitpid(GPid pid, int *exitcode) {
-#ifndef _WIN32
+#ifndef G_OS_WIN32
 	int status;
 	waitpid(pid, &status, 0);
 	if(WIFEXITED(status)) {
@@ -465,9 +514,9 @@ bool util_waitpid(GPid pid, int *exitcode) {
 bool util_kill_process(GPid pid) {
 #ifdef G_OS_UNIX
 	return kill(pid, SIGKILL) == 0;
-#elif G_OS_WIN32
+#elif defined(G_OS_WIN32)
 	return TerminateProcess((HANDLE)pid, 0);
 #else
-	#error Not implemented
+#error Not implemented
 #endif
 }

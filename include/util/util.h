@@ -14,7 +14,7 @@ G_BEGIN_DECLS
 
 #ifdef __APPLE__
 #define OS_NAME "osx"
-#elif __linux
+#elif __linux__
 #define OS_NAME "linux"
 #elif _WIN32
 #define OS_NAME "windows"
@@ -78,6 +78,8 @@ void get_sha256(FILE *fd, char *hash);
 
 void get_sha1(FILE *fd, char *hash);
 
+bool str_ends_with(const char *str, const char *suffix);
+
 void replace_chr(char *src, char replace, char replacement);
 
 void replace_str(String *src, const char *replace, const char *replacement);
@@ -99,6 +101,8 @@ char *get_escaped_command(char *const *cmdline);
 char **get_commandv(char *cmdline);
 
 GPid util_fork_execv(const char *dir, char *const *argv);
+
+char *util_str_execv(const char *dir, char *const *argv);
 
 bool util_waitpid(GPid pid, int *status);
 

@@ -1,3 +1,4 @@
+#include "microlauncher_java_runtime.h"
 #include <ctype.h>
 #include <curl/curl.h>
 #include <gio/gio.h>
@@ -16,7 +17,7 @@
 #include <util/json_util.h>
 #include <util/util.h>
 #include <util/xdgutil.h>
-#ifdef _WIN32
+#ifdef G_OS_WIN32
 #include <shlobj.h>
 #include <windows.h>
 #endif
@@ -31,10 +32,6 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
-#ifdef __linux
-#include <linux/limits.h>
-#endif
 
 #define APPID "io.github.lassebq.microlauncher"
 
@@ -138,8 +135,8 @@ static void bind_column_cb(GtkSignalListItemFactory *factory, GtkListItem *listi
 	g_object_bind_property(item, userdata, label, "label", G_BINDING_SYNC_CREATE);
 }
 
-struct SelectDialog {
-	GtkEntry *entry;
+struct UserDialog {
+	void *data;
 	GtkWindow *parent;
 };
 
@@ -151,8 +148,8 @@ static void select_instance_directory(GtkFileDialog *dialog, GAsyncResult *res, 
 	}
 }
 
-static void select_instance_dir_event(GtkButton *button, struct SelectDialog *data) {
-	GtkEntry *entry = data->entry;
+static void select_instance_dir_event(GtkButton *button, struct UserDialog *data) {
+	GtkEntry *entry = data->data;
 	GtkFileDialog *dialog = gtk_file_dialog_new();
 	GFile *file = g_file_new_for_path(gtk_entry_get_text(entry));
 	if(file && g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) == G_FILE_TYPE_DIRECTORY) {
@@ -162,24 +159,132 @@ static void select_instance_dir_event(GtkButton *button, struct SelectDialog *da
 	g_object_unref(file);
 }
 
-static void select_instance_java(GtkFileDialog *dialog, GAsyncResult *res, GtkEntry *entry) {
+static void select_instance_java(GtkFileDialog *dialog, GAsyncResult *res, GListStore *store) {
 	GFile *file = gtk_file_dialog_open_finish(dialog, res, NULL);
 	if(file) {
-		gtk_entry_set_text(entry, g_file_peek_path(file));
+		JavaRuntime *runtime = microlauncher_java_runtime_new(NULL, g_file_peek_path(file));
+		settings->javaRuntimes = g_slist_append(settings->javaRuntimes, runtime);
+		g_list_store_append(store, runtime);
 		g_object_unref(file);
 	}
 }
 
-static void select_instance_java_event(GtkButton *button, struct SelectDialog *data) {
-	GtkEntry *entry = data->entry;
-	GtkFileDialog *dialog = gtk_file_dialog_new();
-	GFile *file = g_file_new_for_path(gtk_entry_get_text(entry));
-	if(file && g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) == G_FILE_TYPE_REGULAR) {
-		gtk_file_dialog_set_initial_file(dialog, file);
+struct SetActiveJava {
+	GtkColumnView *colView;
+	GtkEntry *entry;
+	GtkWindow *parent;
+};
+
+static void set_active_java(GtkButton *button, struct SetActiveJava *activeRuntime) {
+	JavaRuntime *jre = gtk_single_selection_get_selected_item(GTK_SINGLE_SELECTION(gtk_column_view_get_model(activeRuntime->colView)));
+	if(jre) {
+		gtk_entry_set_text(activeRuntime->entry, jre->location);
 	}
-	gtk_file_dialog_open(dialog, data->parent, NULL, (GAsyncReadyCallback)select_instance_java, entry);
-	if(file)
-		g_object_unref(file);
+	gtk_window_close(activeRuntime->parent);
+}
+
+static void select_instance_java_file(GtkButton *button, struct UserDialog *data) {
+	GListStore *store = data->data;
+	GtkFileDialog *dialog = gtk_file_dialog_new();
+	gtk_file_dialog_open(dialog, data->parent, NULL, (GAsyncReadyCallback)select_instance_java, store);
+}
+
+static void select_instance_java_event(GtkButton *button, struct UserDialog *data) {
+	GtkWidget *widget;
+	GtkScrolledWindow *scrolledWindow;
+	GtkWindow *newWindow = gtk_modal_dialog_new(data->parent);
+	gtk_window_set_default_size(newWindow, 600, 400);
+	gtk_window_set_title(newWindow, "Select Java");
+	struct UserDialog *select = g_new(struct UserDialog, 1);
+	select->data = data->data; // FIXME
+	select->parent = newWindow;
+
+	GtkBox *box = GTK_BOX(gtk_box_new(GTK_ORIENTATION_VERTICAL, 10));
+	gtk_widget_set_margin(GTK_WIDGET(box), 10, 10, 10, 10);
+	gtk_window_set_child(newWindow, GTK_WIDGET(box));
+	widget = gtk_label_new("Java runtimes:");
+	gtk_label_set_xalign(GTK_LABEL(widget), 0.0);
+	gtk_box_append(box, widget);
+
+	widget = gtk_scrolled_window_new();
+	gtk_widget_set_hexpand(widget, true);
+	gtk_widget_set_vexpand(widget, true);
+	scrolledWindow = GTK_SCROLLED_WINDOW(widget);
+
+	GListStore *store = g_list_store_new(G_TYPE_OBJECT);
+	GSList *node = settings->javaRuntimes;
+	JavaRuntime *selectedRuntime = NULL;
+	while(node) {
+		JavaRuntime *runtime = node->data;
+		if(strequal(runtime->location, gtk_entry_get_text(data->data))) {
+			selectedRuntime = runtime;
+		}
+		g_list_store_append(store, node->data);
+		node = node->next;
+	}
+	widget = gtk_column_view_new(NULL);
+	GtkColumnView *columnView = GTK_COLUMN_VIEW(widget);
+	gtk_column_view_set_show_column_separators(columnView, true);
+
+	GtkListItemFactory *factory = gtk_signal_list_item_factory_new();
+	g_signal_connect(factory, "setup", G_CALLBACK(setup_column_cb), NULL);
+	g_signal_connect(factory, "bind", G_CALLBACK(bind_column_cb), "version");
+	GtkColumnViewColumn *column = gtk_column_view_column_new("Version", factory);
+	GtkSorter *sorter = GTK_SORTER(gtk_string_sorter_new(gtk_property_expression_new(microlauncher_java_runtime_get_type(), NULL, "version")));
+	gtk_column_view_column_set_sorter(column, GTK_SORTER(sorter));
+	gtk_column_view_column_set_resizable(column, true);
+	gtk_column_view_append_column(columnView, column);
+	gtk_column_view_sort_by_column(columnView, column, GTK_SORT_DESCENDING);
+
+	factory = gtk_signal_list_item_factory_new();
+	g_signal_connect(factory, "setup", G_CALLBACK(setup_column_cb), NULL);
+	g_signal_connect(factory, "bind", G_CALLBACK(bind_column_cb), "location");
+	column = gtk_column_view_column_new("Location", factory);
+	sorter = GTK_SORTER(gtk_string_sorter_new(gtk_property_expression_new(microlauncher_java_runtime_get_type(), NULL, "location")));
+	gtk_column_view_column_set_sorter(column, GTK_SORTER(sorter));
+	gtk_column_view_column_set_resizable(column, true);
+	gtk_column_view_column_set_expand(column, true);
+	gtk_column_view_append_column(columnView, column);
+
+	sorter = g_object_ref(gtk_column_view_get_sorter(columnView));
+	GtkSortListModel *model = gtk_sort_list_model_new(G_LIST_MODEL(store), sorter);
+	GtkSingleSelection *selection = gtk_single_selection_new(G_LIST_MODEL(model));
+	gtk_single_selection_set_can_unselect(selection, true);
+	gtk_column_view_set_model(columnView, GTK_SELECTION_MODEL(selection));
+	gtk_scrolled_window_set_child(scrolledWindow, widget);
+	gtk_box_append(box, GTK_WIDGET(scrolledWindow));
+
+	if(selectedRuntime) {
+		guint n = g_list_model_get_n_items(G_LIST_MODEL(model));
+		for(guint i = 0; i < n; i++) {
+			JavaRuntime *item = g_list_model_get_item(G_LIST_MODEL(model), i);
+			if(item == selectedRuntime) {
+				gtk_single_selection_set_selected(selection, i);
+				break;
+			}
+		}
+	}
+
+	GtkBox *box2 = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10));
+	struct SetActiveJava *jre = g_new(struct SetActiveJava, 1);
+	jre->entry = data->data;
+	jre->colView = columnView;
+	jre->parent = newWindow;
+	widget = gtk_button_new_with_label("Select");
+	gtk_widget_set_hexpand(widget, true);
+	g_signal_connect_data(widget, "clicked", G_CALLBACK(set_active_java), jre, (GClosureNotify)g_free, 0);
+	gtk_box_append(box2, widget);
+
+	struct UserDialog *addNew = g_new(struct UserDialog, 1);
+	addNew->data = store;
+	addNew->parent = newWindow;
+	widget = gtk_button_new_with_label("Add new");
+	gtk_widget_set_hexpand(widget, true);
+	g_signal_connect_data(widget, "clicked", G_CALLBACK(select_instance_java_file), addNew, (GClosureNotify)g_free, 0);
+	gtk_box_append(box2, widget);
+
+	gtk_box_append(box, GTK_WIDGET(box2));
+	gtk_window_present(newWindow);
 }
 
 static void select_instance_icon(GtkFileDialog *dialog, GAsyncResult *res, gpointer data) {
@@ -390,8 +495,8 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	gtk_box_append(container, widget);
 	widget = gtk_button_new_with_label("Select");
 
-	struct SelectDialog *select = g_new(struct SelectDialog, 1);
-	select->entry = entry;
+	struct UserDialog *select = g_new(struct UserDialog, 1);
+	select->data = entry;
 	select->parent = newWindow;
 	g_signal_connect_data(widget, "clicked", G_CALLBACK(select_instance_dir_event), select, (GClosureNotify)g_free, 0);
 	gtk_box_append(container, widget);
@@ -412,8 +517,8 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	gtk_box_append(container, widget);
 	widget = gtk_button_new_with_label("Select");
 
-	select = g_new(struct SelectDialog, 1);
-	select->entry = entry;
+	select = g_new(struct UserDialog, 1);
+	select->data = entry;
 	select->parent = newWindow;
 	g_signal_connect_data(widget, "clicked", G_CALLBACK(select_instance_java_event), select, (GClosureNotify)g_free, 0);
 	gtk_box_append(container, widget);
@@ -483,7 +588,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	g_signal_connect(factory, "setup", G_CALLBACK(setup_column_cb), NULL);
 	g_signal_connect(factory, "bind", G_CALLBACK(bind_column_cb), "version");
 	GtkColumnViewColumn *column = gtk_column_view_column_new("Version", factory);
-	GtkSorter *sorter = GTK_SORTER(gtk_string_sorter_new(gtk_property_expression_new(MICROLAUNCHER_VERSION_ITEM_TYPE, NULL, "version")));
+	GtkSorter *sorter = GTK_SORTER(gtk_string_sorter_new(gtk_property_expression_new(microlauncher_version_item_get_type(), NULL, "version")));
 	gtk_column_view_column_set_sorter(column, GTK_SORTER(sorter));
 	gtk_column_view_column_set_resizable(column, true);
 	gtk_column_view_append_column(columnView, column);
@@ -492,7 +597,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	g_signal_connect(factory, "setup", G_CALLBACK(setup_column_cb), NULL);
 	g_signal_connect(factory, "bind", G_CALLBACK(bind_column_cb), "type");
 	column = gtk_column_view_column_new("Type", factory);
-	sorter = GTK_SORTER(gtk_string_sorter_new(gtk_property_expression_new(MICROLAUNCHER_VERSION_ITEM_TYPE, NULL, "type")));
+	sorter = GTK_SORTER(gtk_string_sorter_new(gtk_property_expression_new(microlauncher_version_item_get_type(), NULL, "type")));
 	gtk_column_view_column_set_sorter(column, GTK_SORTER(sorter));
 	gtk_column_view_column_set_resizable(column, true);
 	gtk_column_view_append_column(columnView, column);
@@ -501,7 +606,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	g_signal_connect(factory, "setup", G_CALLBACK(setup_column_cb), NULL);
 	g_signal_connect(factory, "bind", G_CALLBACK(bind_column_cb), "releaseTime");
 	column = gtk_column_view_column_new("Release Time", factory);
-	sorter = GTK_SORTER(gtk_string_sorter_new(gtk_property_expression_new(MICROLAUNCHER_VERSION_ITEM_TYPE, NULL, "releaseTime")));
+	sorter = GTK_SORTER(gtk_string_sorter_new(gtk_property_expression_new(microlauncher_version_item_get_type(), NULL, "releaseTime")));
 	gtk_column_view_column_set_expand(column, true);
 	gtk_column_view_column_set_sorter(column, GTK_SORTER(sorter));
 	gtk_column_view_column_set_resizable(column, true);
@@ -783,7 +888,7 @@ static GtkWidget *microlauncher_gui_page_launcher(void) {
 	gtk_widget_set_hexpand(widget, false);
 	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
 
-#ifdef __unix
+#if defined(G_OS_UNIX) && !defined(__APPLE__)
 	widget = gtk_drop_down_simple_new(gpuLabels, NULL);
 	g_signal_connect(widget, "notify::selected", G_CALLBACK(notify_gpu_change), gpuIds);
 	gtk_drop_down_set_selected(GTK_DROP_DOWN(widget), 0);
@@ -870,7 +975,7 @@ static void instance_list_view_setup_factory(GtkListItemFactory *factory, GtkLis
 
 static void microlauncher_create_launcher(MicrolauncherInstance *inst) {
 	char path[PATH_MAX];
-#ifndef _WIN32
+#ifndef G_OS_WIN32
 	snprintf(path, PATH_MAX, "%s/applications/microlauncher-%s.desktop", XDG_DATA_HOME, inst->name);
 	FILE *fd = fopen_mkdir(path, "wb");
 	fprintf(fd,
@@ -1013,7 +1118,7 @@ static void instance_list_view_bind_factory(GtkListItemFactory *factory, GtkList
 	GMenu *menu = g_menu_new();
 	g_menu_append(menu, "Edit", "instance.edit");
 	g_menu_append(menu, "Copy", "instance.copy");
-#ifdef _WIN32
+#ifdef G_OS_WIN32
 	g_menu_append(menu, "Create shortcut", "instance.create-launcher");
 #else
 	g_menu_append(menu, "Create launcher", "instance.create-launcher");
@@ -1695,7 +1800,7 @@ static void scheduled_show_error(const char *msg, void *userdata) {
 }
 
 static void init_gpus(void) {
-#ifdef __unix
+#if defined(G_OS_UNIX) && !defined(__APPLE__)
 	struct pci_access *acc = pci_alloc();
 	struct pci_filter filter;
 	pci_filter_init(acc, &filter);
@@ -1734,7 +1839,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	GtkWidget *widget, *box;
 	GtkCssProvider *provider = gtk_css_provider_new();
 	gtk_css_provider_load_from_string(provider, ".msa-code { font-size: 64px; }");
-	gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_THEME);
+	gtk_style_context_add_provider_for_display(gdk_display_get_default(), GTK_STYLE_PROVIDER(provider), GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 
 	window = GTK_WINDOW(gtk_window_new());
 	gtk_application_add_window(app, window);

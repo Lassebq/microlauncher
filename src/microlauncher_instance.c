@@ -77,36 +77,32 @@ G_DEFINE_TYPE(MicrolauncherInstance, microlauncher_instance, G_TYPE_OBJECT)
 static void microlauncher_instance_init(MicrolauncherInstance *self) {
 	for(guint i = 1; i < N_PROPERTIES; i++) {
 		PropertyDef def = prop_definitions[i];
-		if(def.name) {
-			*(void **)offset_apply(self, def.memberOffs) = NULL;
-		}
+		gobj_util_init_prop(G_OBJECT(self), def);
 	}
 }
 
 void microlauncher_instance_dispose(GObject *self) {
 	for(guint i = 1; i < N_PROPERTIES; i++) {
 		PropertyDef def = prop_definitions[i];
-		if(def.name) {
-			g_clear_pointer((void **)offset_apply(self, def.memberOffs), def.free_func);
-		}
+		gobj_util_dispose_prop(self, def);
 	}
 	G_OBJECT_CLASS(microlauncher_instance_parent_class)->dispose(self);
 }
 
 static void microlauncher_instance_set_property(GObject *object, guint property_id, const GValue *value, GParamSpec *pspec) {
 	PropertyDef def = prop_definitions[property_id];
-	if(def.name) {
-		gobj_util_set_prop(object, def, value);
-		g_object_notify_by_pspec(object, properties[property_id]);
+	if(gobj_util_set_prop(object, def, value)) {
 		return;
-	} else {
-		G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
 	}
+	G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
 }
 
 static void microlauncher_instance_get_property(GObject *object, guint property_id, GValue *value, GParamSpec *pspec) {
 	PropertyDef def = prop_definitions[property_id];
-	gobj_util_get_prop(object, def, value);
+	if(gobj_util_get_prop(object, def, value)) {
+		return;
+	}
+	G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
 }
 
 static void microlauncher_instance_class_init(MicrolauncherInstanceClass *klass) {
@@ -125,7 +121,7 @@ static void microlauncher_instance_class_init(MicrolauncherInstanceClass *klass)
 }
 
 MicrolauncherInstance *microlauncher_instance_clone(MicrolauncherInstance *inst) {
-	MicrolauncherInstance *self = g_object_new(MICROLAUNCHER_INSTANCE_TYPE, NULL);
+	MicrolauncherInstance *self = g_object_new(microlauncher_instance_get_type(), NULL);
 	GValue value;
 	for(guint i = 1; i < N_PROPERTIES; i++) {
 		value = (GValue)G_VALUE_INIT;
@@ -151,6 +147,6 @@ MicrolauncherInstance *microlauncher_instance_clone(MicrolauncherInstance *inst)
 }
 
 MicrolauncherInstance *microlauncher_instance_new(void) {
-	MicrolauncherInstance *self = g_object_new(MICROLAUNCHER_INSTANCE_TYPE, NULL);
+	MicrolauncherInstance *self = g_object_new(microlauncher_instance_get_type(), NULL);
 	return self;
 }

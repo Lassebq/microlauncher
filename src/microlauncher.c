@@ -1,3 +1,4 @@
+#include "microlauncher_java_runtime.h"
 #include <curl/curl.h>
 #include <curl/easy.h>
 #include <gio/gio.h>
@@ -21,10 +22,6 @@
 #include <util/util.h>
 #include <util/xdgutil.h>
 #include <zip.h>
-
-#ifdef __linux__
-#include <linux/limits.h>
-#endif
 
 // macOS uses an outdated version of libcurl
 // which does not have this constant defined.
@@ -79,6 +76,39 @@ MicrolauncherAccount *microlauncher_account_get(GSList *list, const char *id) {
 	return NULL;
 }
 
+json_object *put_string_obj(void *val) {
+	return json_object_new_string(val);
+}
+
+static json_object *save_list(GSList *list, json_object *(*func)(void *element)) {
+	json_object *arr, *str;
+	size_t n = 0;
+	arr = json_object_new_array();
+	n = g_slist_length(list);
+	for(size_t i = 0; i < n; i++) {
+		str = func(g_slist_nth_data(list, i));
+		json_object_array_add(arr, str);
+	}
+	return arr;
+}
+
+void *add_string_val(json_object *obj) {
+	return g_strdup(json_object_get_string(obj));
+}
+
+static void load_list(json_object *arr, GSList **list, void *(*func)(json_object *element)) {
+	json_object *iter;
+	size_t n = 0;
+	*list = NULL;
+	if(json_object_is_type(arr, json_type_array)) {
+		n = json_object_array_length(arr);
+		for(size_t i = 0; i < n; i++) {
+			iter = json_object_array_get_idx(arr, i);
+			*list = g_slist_append(*list, func(iter));
+		}
+	}
+}
+
 MicrolauncherAccount *microlauncher_load_account(json_object *obj) {
 	enum AccountType type = json_get_int(obj, "type");
 	struct MicrosoftUser *userdata;
@@ -125,39 +155,14 @@ void microlauncher_save_account(json_object *obj, MicrolauncherAccount *user) {
 	json_object_object_add(obj, "data", data);
 }
 
-static json_object *save_list(GSList *list) {
-	json_object *arr, *str;
-	size_t n = 0;
-	arr = json_object_new_array();
-	n = g_slist_length(list);
-	for(size_t i = 0; i < n; i++) {
-		str = json_object_new_string(g_slist_nth_data(list, i));
-		json_object_array_add(arr, str);
-	}
-	return arr;
-}
-
-static void load_list(json_object *arr, GSList **list) {
-	json_object *iter;
-	size_t n = 0;
-	*list = NULL;
-	if(json_object_is_type(arr, json_type_array)) {
-		n = json_object_array_length(arr);
-		for(size_t i = 0; i < n; i++) {
-			iter = json_object_array_get_idx(arr, i);
-			*list = g_slist_append(*list, g_strdup(json_object_get_string(iter)));
-		}
-	}
-}
-
 void microlauncher_load_instance(json_object *obj, MicrolauncherInstance *instance) {
 	instance->name = g_strdup(json_get_string(obj, "name"));
 	instance->javaLocation = g_strdup(json_get_string(obj, "javaLocation"));
 	instance->location = g_strdup(json_get_string(obj, "location"));
 	instance->version = g_strdup(json_get_string(obj, "version"));
 	instance->icon = g_strdup(json_get_string(obj, "icon"));
-	load_list(json_object_object_get(obj, "gameArgs"), &instance->extraGameArgs);
-	load_list(json_object_object_get(obj, "jvmArgs"), &instance->jvmArgs);
+	load_list(json_object_object_get(obj, "gameArgs"), &instance->extraGameArgs, add_string_val);
+	load_list(json_object_object_get(obj, "jvmArgs"), &instance->jvmArgs, add_string_val);
 }
 
 void microlauncher_save_instance(json_object *obj, MicrolauncherInstance *instance) {
@@ -166,8 +171,8 @@ void microlauncher_save_instance(json_object *obj, MicrolauncherInstance *instan
 	json_set_string(obj, "location", instance->location);
 	json_set_string(obj, "version", instance->version);
 	json_set_string(obj, "icon", instance->icon);
-	json_object_object_add(obj, "gameArgs", save_list(instance->extraGameArgs));
-	json_object_object_add(obj, "jvmArgs", save_list(instance->jvmArgs));
+	json_object_object_add(obj, "gameArgs", save_list(instance->extraGameArgs, put_string_obj));
+	json_object_object_add(obj, "jvmArgs", save_list(instance->jvmArgs, put_string_obj));
 }
 
 bool microlauncher_init_config(void) {
@@ -755,7 +760,7 @@ char *microlauncher_get_javacp(json_object *json, const char *versions_path, con
 			if(!libpath) {
 				libpath = microlauncher_get_library_path(name, NULL, path);
 			}
-#ifdef _WIN32
+#ifdef G_OS_WIN32
 			string_append_char(&str, ';');
 #else
 			string_append_char(&str, ':');
@@ -772,6 +777,11 @@ struct Settings *microlauncher_get_settings(void) {
 	return &settings;
 }
 
+static void *load_runtimes(json_object *elem) {
+	JavaRuntime *runtime = microlauncher_java_runtime_new(json_get_string(elem, "version"), json_get_string(elem, "location"));
+	return runtime;
+}
+
 void microlauncher_load_settings(void) {
 	char pathbuf[PATH_MAX];
 	snprintf(pathbuf, PATH_MAX, "%s/microlauncher/settings.json", XDG_DATA_HOME);
@@ -783,6 +793,7 @@ void microlauncher_load_settings(void) {
 	settings.width = json_get_int(obj, "width");
 	settings.height = json_get_int(obj, "height");
 	settings.gpu_id = g_strdup(getenv("DRI_PRIME"));
+	load_list(json_object_object_get(obj, "javaRuntimes"), &settings.javaRuntimes, load_runtimes);
 	if(!settings.gpu_id) {
 		settings.gpu_id = g_strdup(json_get_string(obj, "gpu"));
 	}
@@ -792,7 +803,7 @@ void microlauncher_load_settings(void) {
 	} else if((root = json_get_string(obj, "launcherRoot"))) {
 		settings.launcher_root = g_strdup(root);
 	} else {
-#ifdef _WIN32
+#ifdef G_OS_WIN32
 		/* %appdata%/.minecraft */
 		settings.launcher_root = g_strdup_printf("%s/.minecraft", XDG_DATA_HOME);
 #else
@@ -801,6 +812,14 @@ void microlauncher_load_settings(void) {
 #endif
 	}
 	json_object_put(obj);
+}
+
+static json_object *write_runtimes(void *data) {
+	JavaRuntime *runtime = data;
+	json_object *obj = json_object_new_object();
+	json_set_string(obj, "version", runtime->version);
+	json_set_string(obj, "location", runtime->location);
+	return obj;
 }
 
 void microlauncher_save_settings(void) {
@@ -822,6 +841,7 @@ void microlauncher_save_settings(void) {
 		json_set_string(obj, "launcherRoot", settings.launcher_root);
 	}
 	json_set_string(obj, "gpu", settings.gpu_id);
+	json_object_object_add(obj, "javaRuntimes", save_list(settings.javaRuntimes, write_runtimes));
 
 	snprintf(pathbuf, PATH_MAX, "%s/microlauncher/settings.json", XDG_DATA_HOME);
 	json_to_file(obj, pathbuf, JSON_C_TO_STRING_NOSLASHESCAPE | JSON_C_TO_STRING_PRETTY);
@@ -970,7 +990,7 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	malloc_strs[m++] = auth_uuid;
 	char *auth_session = g_strdup_printf("token:%s:%s", auth_token ? auth_token : "", auth_uuid ? auth_uuid : "");
 	malloc_strs[m++] = auth_session;
-	
+
 	char width_str[11];
 	snprintf(width_str, sizeof(width_str), "%d", settings.width);
 	char height_str[11];
@@ -1080,7 +1100,7 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	for(int i = 0; i < c; i++) {
 		g_print("%s\n", argv[i]);
 	}
-#ifdef __unix
+#ifdef G_OS_UNIX
 	if(settings.gpu_id) {
 		setenv("DRI_PRIME", settings.gpu_id, true);
 	}

@@ -4,7 +4,22 @@
 #include <util/gobject_util.h>
 #include <util/util.h>
 
-void gobj_util_set_prop(GObject *obj, PropertyDef prop, const GValue *value) {
+void gobj_util_init_prop(GObject *obj, PropertyDef prop) {
+	if(prop.name) {
+		*(void **)offset_apply(obj, prop.memberOffs) = NULL;
+	}
+}
+
+void gobj_util_dispose_prop(GObject *obj, PropertyDef prop) {
+	if(prop.name) {
+		g_clear_pointer((void **)offset_apply(obj, prop.memberOffs), prop.free_func);
+	}
+}
+
+gboolean gobj_util_set_prop(GObject *obj, PropertyDef prop, const GValue *value) {
+	if((G_PARAM_WRITABLE & prop.flags) == 0) {
+		return false;
+	}
 	void **member = offset_apply(obj, prop.memberOffs);
 	prop.free_func(*member);
 	switch(prop.type) {
@@ -45,9 +60,13 @@ void gobj_util_set_prop(GObject *obj, PropertyDef prop, const GValue *value) {
 			break;
 	}
 	g_object_notify(obj, prop.name);
+	return true;
 }
 
-void gobj_util_get_prop(GObject *obj, PropertyDef prop, GValue *value) {
+gboolean gobj_util_get_prop(GObject *obj, PropertyDef prop, GValue *value) {
+	if((G_PARAM_READABLE & prop.flags) == 0) {
+		return false;
+	}
 	void **member = offset_apply(obj, prop.memberOffs);
 	switch(prop.type) {
 		case G_TYPE_STRING:
@@ -86,6 +105,7 @@ void gobj_util_get_prop(GObject *obj, PropertyDef prop, GValue *value) {
 		default:
 			break;
 	}
+	return true;
 }
 
 GParamSpec *gobj_util_param_spec(PropertyDef prop) {

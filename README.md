@@ -11,22 +11,22 @@ This project uses [CMake](https://cmake.org/).
 
 ### Arch Linux:
 ```
-pacman -Sy gtk4 glib2 util-linux-libs json-c curl libzip openssl
+pacman -Sy gtk4 glib2 util-linux-libs json-c curl libzip openssl imagemagick
 ```
 
 ### Fedora Linux:
 ```
-sudo dnf install gtk4 json-c libzip gtk4-devel json-c-devel libzip-devel pciutils pciutils-devel
+sudo dnf install gtk4 json-c libzip gtk4-devel json-c-devel libzip-devel pciutils pciutils-devel ImageMagick
 ```
 
 ### MSYS2 with MinGW:
 ```
-pacman -Sy mingw-w64-x86_64-gtk4 mingw-w64-x86_64-glib2 mingw-w64-x86_64-json-c mingw-w64-x86_64-curl-winssl mingw-w64-x86_64-libzip mingw-w64-x86_64-openssl
+pacman -Sy mingw-w64-x86_64-gtk4 mingw-w64-x86_64-glib2 mingw-w64-x86_64-json-c mingw-w64-x86_64-curl-winssl mingw-w64-x86_64-libzip mingw-w64-x86_64-openssl mingw-w64-x86_64-imagemagick
 ```
 
 ### macOS:
 ```
-brew install gtk4 json-c libzip
+brew install gtk4 json-c libzip imagemagick
 ```
 
 ## TODO

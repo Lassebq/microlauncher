@@ -1,12 +1,8 @@
 #include <glib.h>
 #include <util/xdgutil.h>
 
-#if defined(__unix) || defined(__APPLE__)
+#ifdef G_OS_UNIX
 #include <pwd.h>
-#endif
-
-#ifdef __linux
-#include <linux/limits.h>
 #endif
 
 #if _WIN32
