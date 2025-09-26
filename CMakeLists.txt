@@ -27,10 +27,11 @@ set(DEPS
     gtk4 json-c gio-2.0 glib-2.0 gobject-2.0 libcurl libcrypto libzip
 )
 if(UNIX AND NOT APPLE)
-    list(APPEND DEPS uuid libpci)
+    list(APPEND DEPS uuid)
 endif()
 
 pkg_check_modules(PKGCONF REQUIRED ${DEPS})
+pkg_check_modules(LIBPCI libpci)
 
 set(ICON_RES 48 64 128 256 512)
 set(ICON_SRC ${CMAKE_CURRENT_SOURCE_DIR}/assets/render_1024x1024.png)
@@ -97,6 +98,13 @@ if(APPLE)
 endif()
 
 add_executable(microlauncher WIN32 MACOSX_BUNDLE ${SOURCES})
+if(NOT LIBPCI_FOUND)
+    target_compile_definitions(microlauncher PRIVATE DISABLE_GPU=1)
+else()
+    target_link_directories(microlauncher PRIVATE ${LIBPCI_LIBRARY_DIRS})
+    target_link_libraries(microlauncher PRIVATE ${LIBPCI_LIBRARIES} m)
+    target_include_directories(microlauncher PRIVATE ${LIBPCI_INCLUDE_DIRS})
+endif()
 
 if(APPLE)
     set_target_properties(microlauncher PROPERTIES

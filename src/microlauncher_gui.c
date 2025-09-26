@@ -21,7 +21,10 @@
 #include <shlobj.h>
 #include <windows.h>
 #endif
-#if defined(G_OS_UNIX) && !defined(__APPLE__)
+#if !defined(G_OS_UNIX) || defined(__APPLE__)
+#define DISABLE_GPU 1
+#endif
+#ifndef DISABLE_GPU
 #include <pci/pci.h>
 #endif
 #include <math.h>
@@ -888,7 +891,7 @@ static GtkWidget *microlauncher_gui_page_launcher(void) {
 	gtk_widget_set_hexpand(widget, false);
 	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
 
-#if defined(G_OS_UNIX) && !defined(__APPLE__)
+#ifndef DISABLE_GPU
 	widget = gtk_drop_down_simple_new(gpuLabels, NULL);
 	g_signal_connect(widget, "notify::selected", G_CALLBACK(notify_gpu_change), gpuIds);
 	gtk_drop_down_set_selected(GTK_DROP_DOWN(widget), 0);
@@ -1800,7 +1803,7 @@ static void scheduled_show_error(const char *msg, void *userdata) {
 }
 
 static void init_gpus(void) {
-#if defined(G_OS_UNIX) && !defined(__APPLE__)
+#ifndef DISABLE_GPU
 	struct pci_access *acc = pci_alloc();
 	struct pci_filter filter;
 	pci_filter_init(acc, &filter);
@@ -1929,8 +1932,6 @@ int microlauncher_gui_show(void) {
 
 	app = gtk_application_new(APPID, G_APPLICATION_NON_UNIQUE);
 
-	// Mapped as Ctrl + Q on Win and Linux but Command + Q on Mac. Specifically when called in main
-	gtk_application_set_accels_for_action(app, "app.quit", (const char *[]){"<Control>q", NULL});
 	g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
 	status = g_application_run(G_APPLICATION(app), argc, argv);
 	g_object_unref(app);
