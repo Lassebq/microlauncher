@@ -1056,12 +1056,17 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 		c += k;
 		m += k;
 	} else {
-		str = g_strdup_printf("-Djava.library.path=%s", natives_dir);
-		malloc_strs[m++] = str;
-		argv[c++] = str;
+		argv[c++] = malloc_strs[m++] = g_strdup_printf("-Djava.library.path=%s", natives_dir);
 		argv[c++] = "-cp";
 		argv[c++] = cp;
 	}
+#ifdef __APPLE__
+	argv[c++] = malloc_strs[m++] = g_strdup_printf("-Xdock:name=%s", instance->name);
+	if(instance->icon) {
+		argv[c++] = malloc_strs[m++] = g_strdup_printf("-Xdock:icon=%s", instance->icon);
+	}
+#endif
+
 	if(instance->jvmArgs) {
 		GSList *node = instance->jvmArgs;
 		while(node) {
