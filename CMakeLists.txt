@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.31.0)
 project(MicroLauncher VERSION 1.0.0 LANGUAGES C CXX)
 
 set(MICROSOFT_CLIENT_ID "95984717-05f1-4b52-8a66-064d0e1e5b55" CACHE STRING "Azure application client ID used for microsoft authentication")
-option(USE_MOJANG_MANIFEST "Uses official mojang manifest without tweaked client JSONs" OFF)
+set(MANIFEST_URL "" CACHE STRING "Version manifest URL")
 
 set(SOURCES
   src/microlauncher.c
@@ -124,8 +124,8 @@ endif()
 target_compile_definitions(microlauncher PRIVATE
     MICROSOFT_CLIENT_ID=\"${MICROSOFT_CLIENT_ID}\"
     LAUNCHER_VERSION=\"${CMAKE_PROJECT_VERSION}\")
-if(${USE_MOJANG_MANIFEST})
-    target_compile_definitions(microlauncher PRIVATE USE_MOJANG_MANIFEST)
+if(NOT MANIFEST_URL STREQUAL "")
+    target_compile_definitions(microlauncher PRIVATE MANIFEST_URL=\"${MANIFEST_URL}\")
 endif()
 target_link_directories(microlauncher PRIVATE ${PKGCONF_LIBRARY_DIRS})
 target_link_libraries(microlauncher PRIVATE ${PKGCONF_LIBRARIES} m)

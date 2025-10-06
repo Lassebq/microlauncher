@@ -259,12 +259,7 @@ bool microlauncher_init(int argc, char **argv) {
 	if(!microlauncher_init_config()) {
 		fprintf(stdout, "No config, using fresh config\n");
 	}
-	const char *manifest_url;
-#ifdef USE_MOJANG_MANIFEST
-	manifest_url = MOJANG_MANIFEST;
-#else
-	manifest_url = BETTERJSONS_MANIFEST;
-#endif
+	const char *manifest_url = MANIFEST_URL;
 	json_object *manifestJson = microlauncher_http_get_json(manifest_url, NULL, NULL);
 	manifest = g_hash_table_new_full(g_str_hash, g_str_equal, NULL, microlauncher_version_destroy);
 

@@ -10,6 +10,9 @@
 
 #define MOJANG_MANIFEST "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
 #define BETTERJSONS_MANIFEST "https://mcphackers.org/BetterJSONs/version_manifest_v2.json"
+#ifndef MANIFEST_URL
+#define MANIFEST_URL BETTERJSONS_MANIFEST
+#endif
 
 #ifndef MICROSOFT_CLIENT_ID
 #define MICROSOFT_CLIENT_ID "95984717-05f1-4b52-8a66-064d0e1e5b55"
