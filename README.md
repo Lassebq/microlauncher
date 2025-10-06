@@ -11,12 +11,17 @@ This project uses [CMake](https://cmake.org/).
 
 ### Arch Linux:
 ```
-pacman -Sy gtk4 glib2 util-linux-libs json-c curl libzip openssl imagemagick
+pacman -Sy gtk4 glib2 util-linux-libs json-c curl libzip openssl imagemagick base-devel cmake
 ```
 
 ### Fedora Linux:
 ```
-sudo dnf install gtk4 json-c libzip gtk4-devel json-c-devel libzip-devel pciutils pciutils-devel ImageMagick
+dnf install gtk4 json-c libzip gtk4-devel json-c-devel libzip-devel pciutils pciutils-devel ImageMagick pkgconf cmake
+```
+
+### Alpine Linux
+```
+apk add gtk4.0-dev json-c-dev libzip-dev pciutils-dev imagemagick pkgconf cmake
 ```
 
 ### MSYS2 with MinGW:
@@ -26,12 +31,11 @@ pacman -Sy mingw-w64-x86_64-gtk4 mingw-w64-x86_64-glib2 mingw-w64-x86_64-json-c 
 
 ### macOS:
 ```
-brew install gtk4 json-c libzip imagemagick
+brew install gtk4 json-c libzip imagemagick pkgconf cmake
 ```
 
 ## TODO
 
 ### GUI:
-- Save java and display their version
 - Implement java downloading from https://launchermeta.mojang.com/v1/products/java-runtime/2ec0cc96c44e5a76b9c8b7c39df7210883d12871/all.json or similar
 - Other memory management fixes

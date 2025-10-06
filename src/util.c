@@ -88,6 +88,10 @@ FILE *fopen_mkdir(const char *path, const char *mode) {
 }
 
 gboolean rmdir_recursive(const gchar *path, GError **error) {
+	if(!g_file_test(path, G_FILE_TEST_IS_DIR)) {
+		return TRUE;
+	}
+
 	GDir *dir = g_dir_open(path, 0, error);
 	if(!dir) {
 		return FALSE;

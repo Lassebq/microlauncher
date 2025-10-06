@@ -68,9 +68,11 @@ foreach(res IN LISTS ICON_RES)
             DEPENDS ${ICON_SRC}
         )
     endif()
+    list(APPEND PNG_ICONS "${ICONS_DIR}/icon_${res}x${res}.png")
 
     install(FILES "${ICONS_DIR}/icon_${res}x${res}.png" DESTINATION "share/icons/hicolor/${res}x${res}/apps" RENAME "io.github.lassebq.microlauncher.png")
 endforeach()
+add_custom_target(icons ALL DEPENDS ${PNG_ICONS})
 
 if(WIN32)
     add_custom_command(

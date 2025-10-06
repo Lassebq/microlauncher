@@ -49,6 +49,7 @@ static GtkProgressBar *progressBar;
 static GtkStack *launcherStack;
 static GtkCheckButton *checkFullscreen;
 static GtkCheckButton *checkDemo;
+static GtkCheckButton *checkUpdate;
 static GtkEntry *widthEntry;
 static GtkEntry *heightEntry;
 static GtkRevealer *revealer;
@@ -815,6 +816,7 @@ static void clicked_play(void) {
 	settings->width = atoi(gtk_entry_buffer_get_text(gtk_entry_get_buffer(widthEntry)));
 	settings->height = atoi(gtk_entry_buffer_get_text(gtk_entry_get_buffer(heightEntry)));
 	settings->fullscreen = gtk_check_button_get_active(checkFullscreen);
+	settings->allowUpdate = gtk_check_button_get_active(checkUpdate);
 	settings->demo = gtk_check_button_get_active(checkDemo);
 	instanceCancellable = g_cancellable_new();
 	GTask *task = g_task_new(playButton, instanceCancellable, NULL, NULL);
@@ -903,6 +905,11 @@ static GtkWidget *microlauncher_gui_page_launcher(void) {
 	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
 #endif
 
+	widget = gtk_check_button_new_with_label("Update version JSON");
+	checkUpdate = GTK_CHECK_BUTTON(widget);
+	gtk_widget_set_hexpand(widget, false);
+	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
+
 	gtk_box_append(GTK_BOX(box), frame);
 
 	widget = gtk_button_new_with_label("Play");
@@ -923,6 +930,18 @@ struct InstanceRowWidgets {
 
 static void popover_destroy(GtkWidget *self, GtkWidget *destroy) {
 	gtk_widget_unparent(destroy);
+}
+
+static void show_row_menu_touch(GtkGestureLongPress *gesture, gdouble x, gdouble y, gpointer user_data) {
+	GtkWidget *row_widget = gtk_event_controller_get_widget(GTK_EVENT_CONTROLLER(gesture));
+	GtkPopover *popover = GTK_POPOVER(gtk_popover_menu_new_from_model(G_MENU_MODEL(user_data)));
+
+	gtk_popover_set_has_arrow(popover, false);
+	gtk_popover_set_pointing_to(popover, &(GdkRectangle){(int)x, (int)y, 1, 1});
+	gtk_widget_set_halign(GTK_WIDGET(popover), GTK_ALIGN_START);
+	gtk_widget_set_parent(GTK_WIDGET(popover), row_widget);
+	gtk_popover_popup(popover);
+	g_signal_connect(row_widget, "destroy", G_CALLBACK(popover_destroy), popover);
 }
 
 static void show_row_menu(GtkGestureClick *gesture, gint n_press, gdouble x, gdouble y, gpointer user_data) {
@@ -953,6 +972,7 @@ static void instance_list_view_setup_factory(GtkListItemFactory *factory, GtkLis
 
 	widget = gtk_label_new(NULL);
 	rw->instanceLabel = GTK_LABEL(widget);
+	gtk_label_set_ellipsize(GTK_LABEL(widget), PANGO_ELLIPSIZE_END);
 	gtk_widget_set_halign(widget, GTK_ALIGN_START);
 	gtk_widget_set_hexpand(widget, true);
 	gtk_widget_add_css_class(widget, "title");
@@ -1015,7 +1035,12 @@ static void microlauncher_create_launcher(MicrolauncherInstance *inst) {
 
 static void instance_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant *parameter, gpointer *data) {
 	MicrolauncherInstance *inst = (MicrolauncherInstance *)data;
-	if(strcmp(g_action_get_name(G_ACTION(simple_action)), "edit") == 0) {
+	if(strcmp(g_action_get_name(G_ACTION(simple_action)), "play") == 0) {
+		settings->instance = inst;
+		microlauncher_gui_refresh_instance();
+		microlauncher_gui_switch_to_tab(NULL, "launcher");
+		clicked_play();
+	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "edit") == 0) {
 		microlauncher_modify_instance_window(NULL, inst);
 	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "copy") == 0) {
 		GSList *instances = *microlauncher_get_instances();
@@ -1116,9 +1141,8 @@ static void instance_list_view_bind_factory(GtkListItemFactory *factory, GtkList
 	struct InstanceRowWidgets *rw = g_object_get_data(G_OBJECT(list_item), "row-widgets");
 	GtkWidget *parent = gtk_widget_get_parent(rw->grid);
 
-	GtkGesture *click = gtk_gesture_click_new();
-	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_SECONDARY);
 	GMenu *menu = g_menu_new();
+	g_menu_append(menu, "Play", "instance.play");
 	g_menu_append(menu, "Edit", "instance.edit");
 	g_menu_append(menu, "Copy", "instance.copy");
 #ifdef G_OS_WIN32
@@ -1127,14 +1151,22 @@ static void instance_list_view_bind_factory(GtkListItemFactory *factory, GtkList
 	g_menu_append(menu, "Create launcher", "instance.create-launcher");
 #endif
 	g_menu_append(menu, "Delete", "instance.delete");
-	g_signal_connect(click, "pressed", G_CALLBACK(show_row_menu), menu);
-	gtk_widget_add_controller(parent, GTK_EVENT_CONTROLLER(click));
+
+	GtkGesture *gesture = gtk_gesture_click_new();
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
+	g_signal_connect(gesture, "pressed", G_CALLBACK(show_row_menu), menu);
+	gtk_widget_add_controller(parent, GTK_EVENT_CONTROLLER(gesture));
+
+	gesture = GTK_GESTURE(gtk_gesture_long_press_new());
+	gtk_gesture_single_set_touch_only(GTK_GESTURE_SINGLE(gesture), true);
+	g_signal_connect(gesture, "pressed", G_CALLBACK(show_row_menu_touch), menu);
+	gtk_widget_add_controller(parent, GTK_EVENT_CONTROLLER(gesture));
 
 	MicrolauncherInstance *instance = gtk_list_item_get_item(list_item);
 	GSimpleActionGroup *actions = g_simple_action_group_new();
 	GSimpleAction *action;
 
-	const char *action_names[] = {"edit", "copy", "create-launcher", "delete", NULL};
+	const char *action_names[] = {"play", "edit", "copy", "create-launcher", "delete", NULL};
 	int i = 0;
 	while(action_names[i]) {
 		action = g_simple_action_new(action_names[i], NULL);
@@ -1291,13 +1323,19 @@ static void account_list_view_bind_factory(GtkListItemFactory *factory, GtkListI
 	struct AccountRowWidgets *rw = g_object_get_data(G_OBJECT(list_item), "row-widgets");
 	GtkWidget *parent = gtk_widget_get_parent(rw->grid);
 
-	GtkGesture *click = gtk_gesture_click_new();
-	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(click), GDK_BUTTON_SECONDARY);
 	GMenu *menu = g_menu_new();
 	g_menu_append(menu, "Edit", "account.edit");
 	g_menu_append(menu, "Delete", "account.delete");
-	g_signal_connect(click, "pressed", G_CALLBACK(show_row_menu), menu);
-	gtk_widget_add_controller(parent, GTK_EVENT_CONTROLLER(click));
+
+	GtkGesture *gesture = gtk_gesture_click_new();
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(gesture), GDK_BUTTON_SECONDARY);
+	g_signal_connect(gesture, "pressed", G_CALLBACK(show_row_menu), menu);
+	gtk_widget_add_controller(parent, GTK_EVENT_CONTROLLER(gesture));
+
+	gesture = GTK_GESTURE(gtk_gesture_long_press_new());
+	gtk_gesture_single_set_touch_only(GTK_GESTURE_SINGLE(gesture), true);
+	g_signal_connect(gesture, "pressed", G_CALLBACK(show_row_menu_touch), menu);
+	gtk_widget_add_controller(parent, GTK_EVENT_CONTROLLER(gesture));
 
 	MicrolauncherAccount *account = gtk_list_item_get_item(list_item);
 	GSimpleActionGroup *actions = g_simple_action_group_new();
@@ -1916,6 +1954,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 
 	gtk_check_button_set_active(checkFullscreen, settings->fullscreen);
 	gtk_check_button_set_active(checkDemo, settings->demo);
+	gtk_check_button_set_active(checkUpdate, settings->allowUpdate);
 
 	microlauncher_set_callbacks(callbacks);
 	g_signal_connect(window, "close-request", G_CALLBACK(close_request), NULL);

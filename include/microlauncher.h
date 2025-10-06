@@ -27,6 +27,7 @@ struct Settings {
 	int height;
 	bool fullscreen;
 	bool demo;
+	bool allowUpdate;
 	char *launcher_root;
 	char *manifest_url;
 	char *gpu_id;

@@ -21,6 +21,11 @@ const char *json_get_string(json_object *obj, const char *key) {
 	return (json_object_is_type(val, json_type_string)) ? json_object_get_string(val) : NULL;
 }
 
+bool json_get_bool_fallback(json_object *obj, const char *key, bool fallback) {
+	json_object *val = json_object_object_get(obj, key);
+	return (json_object_is_type(val, json_type_boolean)) ? json_object_get_boolean(val) : fallback;
+}
+
 bool json_get_bool(json_object *obj, const char *key) {
 	json_object *val = json_object_object_get(obj, key);
 	return (json_object_is_type(val, json_type_boolean)) ? json_object_get_boolean(val) : false;

@@ -240,6 +240,7 @@ bool microlauncher_init(int argc, char **argv) {
 		fprintf(stderr, "Failed to initialize environment\n");
 		return false;
 	}
+	g_print("OS name: %s, arch: %s\n", OS_NAME, OS_ARCH);
 	globalCurlHandle = curl_easy_init();
 	if(!globalCurlHandle) {
 		fprintf(stderr, "Can't initialize curl\n"); // Non fatal
@@ -310,7 +311,7 @@ size_t write_callback(void *ptr, size_t size, size_t nmemb, void *userdata) {
 void microlauncher_set_curl_opts(CURL *curl) {
 	curl_easy_setopt(curl, CURLOPT_SSL_OPTIONS, CURLSSLOPT_NATIVE_CA);
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, CURLFOLLOW_ALL);
-	curl_easy_setopt(curl, CURLOPT_TIMEOUT, 20L);
+	curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, 20L);
 }
 
 bool microlauncher_http_get_with_handle(CURL *curl, const char *url, const char *save_location) {
@@ -328,7 +329,12 @@ bool microlauncher_http_get_with_handle(CURL *curl, const char *url, const char 
 	microlauncher_set_curl_opts(curl);
 	code = curl_easy_perform(curl);
 	fclose(file);
-	return code == CURLE_OK;
+	if(code == CURLE_OK) {
+		return true;
+	} else {
+		g_print("CURL error (%d) on %s\n", code, url);
+		return false;
+	}
 }
 
 bool microlauncher_http_get(const char *url, const char *save_location) {
@@ -433,10 +439,9 @@ bool microlauncher_fetch_artifact(const char *url, const char *path, const char 
 	return true; /* everything is fine and we can keep local lib */
 
 redownload:
-	if(url) {
+	if(url && strlen(url) > 0) {
 		/* Sharing curl handle has better performance, but doesn't work in multithreaded scenario */
 		if(!microlauncher_http_get_with_handle(globalCurlHandle, url, path)) {
-			g_print("CURL error on %s\n", url);
 			return false;
 		}
 	}
@@ -520,7 +525,7 @@ bool microlauncher_fetch_library(json_object *libObj, const char *libraries_path
 	return true;
 }
 
-json_object *inherit_json(const char *versions_path, const char *id) {
+json_object *inherit_json(const char *versions_path, const char *id, bool allowUpdate) {
 	char path[PATH_MAX];
 	if(!id) {
 		return NULL;
@@ -528,15 +533,14 @@ json_object *inherit_json(const char *versions_path, const char *id) {
 	snprintf(path, PATH_MAX, "%s/%s/%s.json", versions_path, id, id);
 	struct Version *version = g_hash_table_lookup(manifest, id);
 	// TODO let the user decide whenever to keep changes to local JSON or update with manifest one.
-	GFile *file = g_file_new_for_path(path);
-	if(version && g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) != G_FILE_TYPE_REGULAR) {
+	if(version && allowUpdate) {
 		microlauncher_fetch_artifact(version->url, path, NULL, version->sha1, 0, 0, NULL);
 	}
 	json_object *thisObj = json_from_file(path);
 	if(!thisObj) {
 		return NULL;
 	}
-	json_object *obj = inherit_json(versions_path, json_get_string(thisObj, "inheritsFrom"));
+	json_object *obj = inherit_json(versions_path, json_get_string(thisObj, "inheritsFrom"), allowUpdate);
 	if(json_object_is_type(obj, json_type_object)) {
 		json_object_object_foreach(thisObj, key, val) {
 			json_object *thisMember = json_object_object_get(thisObj, key);
@@ -627,12 +631,12 @@ static bool check_rules(json_object *rules, GSList *featuresList) {
 	return appliedAction == RULE_ACTION_ALLOW;
 }
 
-json_object *microlauncher_fetch_version(const char *versionId, const char *versions_path, const char *libraries_path, const char *natives_path, const char *assets_dir, GCancellable *cancellable, char *failedUrl) {
+json_object *microlauncher_fetch_version(const char *versionId, const char *versions_path, const char *libraries_path, const char *natives_path, const char *assets_dir, GCancellable *cancellable, char *failedUrl, bool allowUpdate) {
 	json_object *json, *libraries, *downloads, *artifact, *client, *iter, *assets_json, *obj;
 	char path[PATH_MAX];
 	char url[PATH_MAX];
 	snprintf(path, PATH_MAX, "%s/%s/%s.json", versions_path, versionId, versionId);
-	json = inherit_json(versions_path, versionId);
+	json = inherit_json(versions_path, versionId, allowUpdate);
 	if(!json) {
 		return NULL;
 	}
@@ -789,6 +793,7 @@ void microlauncher_load_settings(void) {
 	settings.instance = microlauncher_instance_get(instances, json_get_string(obj, "instance"));
 	settings.user = microlauncher_account_get(accounts, json_get_string(obj, "user"));
 	settings.fullscreen = json_get_bool(obj, "fullscreen");
+	settings.allowUpdate = json_get_bool_fallback(obj, "update", true);
 	settings.demo = json_get_bool(obj, "demo");
 	settings.width = json_get_int(obj, "width");
 	settings.height = json_get_int(obj, "height");
@@ -836,6 +841,7 @@ void microlauncher_save_settings(void) {
 	json_set_int(obj, "width", settings.width);
 	json_set_int(obj, "height", settings.height);
 	json_set_bool(obj, "fullscreen", settings.fullscreen);
+	json_set_bool(obj, "update", settings.allowUpdate);
 	json_set_bool(obj, "demo", settings.demo);
 	if(settings.launcher_root) {
 		json_set_string(obj, "launcherRoot", settings.launcher_root);
@@ -957,7 +963,7 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	str = random_uuid();
 	snprintf(natives_dir, PATH_MAX, "%s/natives-%s", TEMPDIR, str);
 	free(str);
-	json_object *json = microlauncher_fetch_version(instance->version, versions_dir, libraries_dir, natives_dir, assets_dir, cancellable, path);
+	json_object *json = microlauncher_fetch_version(instance->version, versions_dir, libraries_dir, natives_dir, assets_dir, cancellable, path, settings.allowUpdate);
 	if(path[0]) {
 		char *format = g_strdup_printf("Failed to fetch resource: %s", path);
 		run_callback(show_error, format);
@@ -1032,7 +1038,16 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 
 	c = 0;
 	char *argv[256];
-	/* TODO determine java automatically from javaVersion key */
+/* TODO determine java automatically from javaVersion key */
+#ifdef G_OS_UNIX
+	argv[c++] = "env";
+	if(settings.gpu_id) {
+		argv[c++] = malloc_strs[m++] = g_strdup_printf("DRI_PRIME=%s", settings.gpu_id);
+	}
+	if(access("/lib/libgcompat.so.0", R_OK) == 0) {
+		argv[c++] = malloc_strs[m++] = g_strdup_printf("LD_PRELOAD=%s", "/lib/libgcompat.so.0");
+	}
+#endif
 	argv[c++] = instance->javaLocation ? instance->javaLocation : "java";
 
 	// JVM args
@@ -1100,11 +1115,6 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	for(int i = 0; i < c; i++) {
 		g_print("%s\n", argv[i]);
 	}
-#ifdef G_OS_UNIX
-	if(settings.gpu_id) {
-		setenv("DRI_PRIME", settings.gpu_id, true);
-	}
-#endif
 	GPid pid = util_fork_execv(instance->location, argv);
 
 	run_callback(instance_started, pid);
