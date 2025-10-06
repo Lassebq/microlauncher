@@ -1021,7 +1021,9 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 		// TODO quickplay
 		NULL};
 	GSList *features = NULL;
-	features = g_slist_append(features, g_strdup("has_custom_resolution"));
+	if(settings.width != 0 && settings.height != 0) {
+		features = g_slist_append(features, g_strdup("has_custom_resolution"));
+	}
 	if(settings.demo) {
 		features = g_slist_append(features, g_strdup("is_demo_user"));
 	}
