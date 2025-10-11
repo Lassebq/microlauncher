@@ -5,14 +5,53 @@
 #include <util/util.h>
 
 void gobj_util_init_prop(GObject *obj, PropertyDef prop) {
-	if(prop.name) {
-		*(void **)offset_apply(obj, prop.memberOffs) = NULL;
+	if(!prop.name) {
+		return;
+	}
+	void **member = offset_apply(obj, prop.memberOffs);
+
+	switch(prop.type) {
+		case G_TYPE_STRING:
+			*(gchar **)member = NULL;
+			break;
+		case G_TYPE_POINTER:
+			*member = NULL;
+			break;
+		case G_TYPE_INT:
+			*(gint *)member = 0;
+			break;
+		case G_TYPE_INT64:
+			*(gint64 *)member = 0;
+			break;
+		case G_TYPE_LONG:
+			*(glong *)member = 0;
+			break;
+		case G_TYPE_ULONG:
+			*(gulong *)member = 0;
+			break;
+		case G_TYPE_FLOAT:
+			*(gfloat *)member = 0.0f;
+			break;
+		case G_TYPE_DOUBLE:
+			*(gdouble *)member = 0.0;
+			break;
+		case G_TYPE_UINT:
+			*(guint *)member = 0;
+			break;
+		case G_TYPE_UINT64:
+			*(guint64 *)member = 0;
+			break;
+		case G_TYPE_BOOLEAN:
+			*(gboolean *)member = false;
+			break;
+		default:
+			break;
 	}
 }
 
 void gobj_util_dispose_prop(GObject *obj, PropertyDef prop) {
-	if(prop.name) {
-		g_clear_pointer((void **)offset_apply(obj, prop.memberOffs), prop.free_func);
+	if(prop.name && prop.free_func) {
+		prop.free_func(*(void **)offset_apply(obj, prop.memberOffs));
 	}
 }
 
@@ -21,7 +60,9 @@ gboolean gobj_util_set_prop(GObject *obj, PropertyDef prop, const GValue *value)
 		return false;
 	}
 	void **member = offset_apply(obj, prop.memberOffs);
-	prop.free_func(*member);
+	if(prop.free_func) {
+		prop.free_func(*member);
+	}
 	switch(prop.type) {
 		case G_TYPE_STRING:
 			*(gchar **)member = g_strdup(g_value_get_string(value));

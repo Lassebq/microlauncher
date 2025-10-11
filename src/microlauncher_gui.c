@@ -193,6 +193,10 @@ static void select_instance_java_file(GtkButton *button, struct UserDialog *data
 	gtk_file_dialog_open(dialog, data->parent, NULL, (GAsyncReadyCallback)select_instance_java, store);
 }
 
+static void activate_java_row(GtkColumnView *self, guint position, struct SetActiveJava *activeRuntime) {
+	set_active_java(NULL, activeRuntime);
+}
+
 static void select_instance_java_event(GtkButton *button, struct UserDialog *data) {
 	GtkWidget *widget;
 	GtkScrolledWindow *scrolledWindow;
@@ -234,6 +238,12 @@ static void select_instance_java_event(GtkButton *button, struct UserDialog *dat
 	g_signal_connect(factory, "setup", G_CALLBACK(setup_column_cb), NULL);
 	g_signal_connect(factory, "bind", G_CALLBACK(bind_column_cb), "version");
 	GtkColumnViewColumn *column = gtk_column_view_column_new("Version", factory);
+	struct SetActiveJava *jre = g_new(struct SetActiveJava, 1);
+	jre->entry = data->data;
+	jre->colView = columnView;
+	jre->parent = newWindow;
+	g_signal_connect(columnView, "activate", G_CALLBACK(activate_java_row), jre);
+
 	GtkSorter *sorter = GTK_SORTER(gtk_string_sorter_new(gtk_property_expression_new(microlauncher_java_runtime_get_type(), NULL, "version")));
 	gtk_column_view_column_set_sorter(column, GTK_SORTER(sorter));
 	gtk_column_view_column_set_resizable(column, true);
@@ -270,10 +280,6 @@ static void select_instance_java_event(GtkButton *button, struct UserDialog *dat
 	}
 
 	GtkBox *box2 = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10));
-	struct SetActiveJava *jre = g_new(struct SetActiveJava, 1);
-	jre->entry = data->data;
-	jre->colView = columnView;
-	jre->parent = newWindow;
 	widget = gtk_button_new_with_label("Select");
 	gtk_widget_set_hexpand(widget, true);
 	g_signal_connect_data(widget, "clicked", G_CALLBACK(set_active_java), jre, (GClosureNotify)g_free, 0);
@@ -334,6 +340,7 @@ struct CreateInstance {
 
 static void create_or_modify_instance(GtkButton *button, void *userdata) {
 	struct CreateInstance *createInstance = (struct CreateInstance *)userdata;
+	const char *strConst;
 	GValue strVal = G_VALUE_INIT;
 	g_value_init(&strVal, G_TYPE_STRING);
 
@@ -345,7 +352,8 @@ static void create_or_modify_instance(GtkButton *button, void *userdata) {
 	g_value_set_string(&strVal, gtk_entry_get_text(createInstance->instanceDir));
 	g_object_set_property(G_OBJECT(inst), "location", &strVal);
 
-	g_value_set_string(&strVal, gtk_entry_get_text(createInstance->instanceJvm));
+	strConst = gtk_entry_get_text(createInstance->instanceJvm);
+	g_value_set_string(&strVal, strlen(strConst) > 0 ? strConst : NULL);
 	g_object_set_property(G_OBJECT(inst), "java-location", &strVal);
 
 	g_value_set_string(&strVal, g_object_get_data(G_OBJECT(createInstance->instanceIcon), "icon-location"));
@@ -429,6 +437,12 @@ static void instance_name_changed(GtkEntry *self, gpointer user_data) {
 		gtk_widget_set_tooltip_text(GTK_WIDGET(self), "");
 		gtk_widget_set_sensitive(instName.createButton, true);
 	}
+}
+
+static void set_entry_filter(GtkEditable *editable, gpointer user_data) {
+	GtkStringFilter *filter = GTK_STRING_FILTER(user_data);
+	const char *text = gtk_editable_get_text(editable);
+	gtk_string_filter_set_search(filter, text);
 }
 
 static void microlauncher_modify_instance_window(GtkButton *button, MicrolauncherInstance *instance) {
@@ -572,9 +586,17 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	}
 	gtk_grid_attach(grid, widget, 2, row++, 1, 1);
 
-	widget = gtk_label_new("Select version:");
-	gtk_widget_set_halign(widget, GTK_ALIGN_START);
+	GtkExpression *expr = gtk_property_expression_new(microlauncher_version_item_get_type(), NULL, "version");
+
+	GtkStringFilter *stringFilter = gtk_string_filter_new(expr);
+	gtk_string_filter_set_ignore_case(stringFilter, true);
+	gtk_string_filter_set_match_mode(stringFilter, GTK_STRING_FILTER_MATCH_MODE_SUBSTRING);
+	widget = gtk_entry_new();
+	g_signal_connect(widget, "changed", G_CALLBACK(set_entry_filter), stringFilter);
+	gtk_entry_set_placeholder_text(GTK_ENTRY(widget), "Search");
+	widget = gtk_widget_with_label("Version:", widget);
 	gtk_box_append(box, widget);
+
 	widget = gtk_scrolled_window_new();
 	gtk_widget_set_hexpand(widget, true);
 	gtk_widget_set_vexpand(widget, true);
@@ -618,7 +640,8 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	gtk_column_view_sort_by_column(columnView, column, GTK_SORT_DESCENDING);
 
 	sorter = g_object_ref(gtk_column_view_get_sorter(columnView));
-	GtkSortListModel *model = gtk_sort_list_model_new(G_LIST_MODEL(store), sorter);
+	GtkFilterListModel *filterModel = gtk_filter_list_model_new(G_LIST_MODEL(store), GTK_FILTER(stringFilter));
+	GtkSortListModel *model = gtk_sort_list_model_new(G_LIST_MODEL(filterModel), sorter);
 	GtkSingleSelection *selection = gtk_single_selection_new(G_LIST_MODEL(model));
 	gtk_column_view_set_model(columnView, GTK_SELECTION_MODEL(selection));
 	gtk_scrolled_window_set_child(scrolledWindow, widget);
@@ -1430,6 +1453,9 @@ static void check_device_code(GTask *task, gpointer source_object, gpointer task
 	}
 }
 
+gboolean getting_code = false;
+GMutex mutx;
+
 static void get_new_code(GTask *task, gpointer source_object, gpointer task_data, GCancellable *cancellable) {
 	struct DeviceCodeOAuthResponse response = microlauncher_msa_get_device_code();
 	if(oAuthResponse) {
@@ -1439,8 +1465,10 @@ static void get_new_code(GTask *task, gpointer source_object, gpointer task_data
 	memcpy(oAuthResponse, &response, sizeof(struct DeviceCodeOAuthResponse));
 
 	msaSecondsLeft = response.expires_in;
+	checkDeviceCode = response.interval;
 	g_idle_add(reload_code, oAuthResponse);
 	g_object_unref(task);
+	getting_code = false;
 }
 
 static gboolean update_msa_timeout(void *data) {
@@ -1455,15 +1483,19 @@ static gboolean update_msa_timeout(void *data) {
 		// msaSecondsLeft = 0;
 		return true;
 	}
-	if(msaSecondsLeft == 0) {
-		GTask *task = g_task_new(window, NULL, NULL, NULL);
-		g_task_set_task_data(task, oAuthResponse, NULL /* (GDestroyNotify)microlauncher_msa_destroy_device_code */);
-		g_task_run_in_thread(task, get_new_code);
-	}
-	if(checkDeviceCode == 0) {
-		GTask *task = g_task_new(window, NULL, NULL, NULL);
-		g_task_set_task_data(task, oAuthResponse, NULL /* (GDestroyNotify)microlauncher_msa_destroy_device_code */);
-		g_task_run_in_thread(task, check_device_code);
+	if(!getting_code) {
+		g_mutex_lock(&mutx);
+		if(msaSecondsLeft == 0) {
+			getting_code = true;
+			GTask *task = g_task_new(window, NULL, NULL, NULL);
+			g_task_set_task_data(task, oAuthResponse, NULL /* (GDestroyNotify)microlauncher_msa_destroy_device_code */);
+			g_task_run_in_thread(task, get_new_code);
+		} else if(checkDeviceCode == 0) {
+			GTask *task = g_task_new(window, NULL, NULL, NULL);
+			g_task_set_task_data(task, oAuthResponse, NULL /* (GDestroyNotify)microlauncher_msa_destroy_device_code */);
+			g_task_run_in_thread(task, check_device_code);
+		}
+		g_mutex_unlock(&mutx);
 	}
 	if(oAuthResponse && oAuthResponse->expires_in > 0)
 		gtk_progress_bar_set_fraction(msaTimeout, (double)msaSecondsLeft / oAuthResponse->expires_in);
@@ -1598,6 +1630,7 @@ static void on_stack_page_changed(GObject *obj, GParamSpec *pspec, gpointer user
 		reload_code(oAuthResponse);
 		if(!check_running) {
 			check_running = true;
+			g_mutex_init(&mutx);
 			update_msa_timeout(NULL);
 			g_timeout_add_seconds(1, update_msa_timeout, NULL);
 		}
@@ -1748,8 +1781,9 @@ struct AsyncPid {
 	void *userdata;
 };
 
-static gboolean microlauncher_gui_enable_kill(struct AsyncPid *userdata) {
-	instancePid = userdata->pid;
+static gboolean microlauncher_gui_enable_kill(void *userdata) {
+	struct AsyncPid *asyncPid = userdata;
+	instancePid = asyncPid->pid;
 	g_object_unref(instanceCancellable);
 	instanceCancellable = NULL;
 	gtk_button_set_label(playButton, "Kill");
@@ -1761,11 +1795,11 @@ static void scheduled_launcher_set_pid(GPid pid, void *userdata) {
 	struct AsyncPid *data = g_new(struct AsyncPid, 1);
 	data->pid = pid;
 	data->userdata = userdata;
-	g_idle_add(G_SOURCE_FUNC(microlauncher_gui_enable_kill), data);
+	g_idle_add(microlauncher_gui_enable_kill, data);
 }
 
 static void scheduled_launcher_enable_play(void *userdata) {
-	g_idle_add(G_SOURCE_FUNC(microlauncher_gui_enable_play), userdata);
+	g_idle_add(microlauncher_gui_enable_play, userdata);
 }
 
 struct ProgressUpdate {

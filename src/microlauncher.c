@@ -240,7 +240,8 @@ bool microlauncher_init(int argc, char **argv) {
 		fprintf(stderr, "Failed to initialize environment\n");
 		return false;
 	}
-	g_print("OS name: %s, arch: %s\n", OS_NAME, OS_ARCH);
+	enum Platform plat = platform_get();
+	g_print("OS name: %s, arch: %s\n", platform_get_name(plat), platform_get_arch(plat));
 	globalCurlHandle = curl_easy_init();
 	if(!globalCurlHandle) {
 		fprintf(stderr, "Can't initialize curl\n"); // Non fatal
@@ -448,7 +449,8 @@ bool microlauncher_fetch_library(json_object *libObj, const char *libraries_path
 	json_object *artifact = json_object_object_get(downloads, "artifact");
 	json_object *classifiers = json_object_object_get(downloads, "classifiers");
 	json_object *natives = json_object_object_get(libObj, "natives");
-	const char *classifier = json_get_string(natives, OS_NAME);
+	const char *classifier;
+	enum Platform plat = platform_get();
 	json_object *obj, *iter;
 
 	const char *name = json_get_string(libObj, "name");
@@ -478,46 +480,89 @@ bool microlauncher_fetch_library(json_object *libObj, const char *libraries_path
 		return false;
 	}
 
-	if(classifier) {
-		obj = json_object_object_get(classifiers, classifier);
-		if(!obj) {
-			return true;
+	if(!natives) {
+		return true;
+	}
+	json_object_object_foreach(natives, key, val) {
+		if(!platform_is_valid_alias(plat, key)) {
+			continue;
 		}
-		path = json_get_string(obj, "path");
-		url = json_get_string(obj, "url");
-		if(!path) {
-			path = microlauncher_get_library_path(name, classifier, pathbuff);
-		}
-		snprintf(realpath, PATH_MAX, "%s/%s", libraries_path, path);
-		if(!url && url_base) {
-			snprintf(url2, PATH_MAX, "%s/%s", url_base, path);
-			url = url2;
-		}
-		if(!microlauncher_fetch_artifact(
-			   url,
-			   realpath,
-			   NULL,
-			   json_get_string(obj, "sha1"),
-			   json_get_int64(obj, "size"),
-			   total_size, download_size)) {
-			snprintf(failedUrl, PATH_MAX, "%s", url);
-			return false;
-		}
-
-		obj = json_object_object_get(libObj, "extract");
-		obj = json_object_object_get(obj, "exclude");
-		if(json_object_is_type(obj, json_type_array)) {
-			size_t n = json_object_array_length(obj);
-			const char *exclusions[n + 1];
-			exclusions[n] = NULL;
-			for(size_t i = 0; i < n; i++) {
-				iter = json_object_array_get_idx(obj, i);
-				exclusions[i] = json_object_get_string(iter);
+		classifier = json_get_string(natives, key);
+		if(classifier) {
+			obj = json_object_object_get(classifiers, classifier);
+			if(!obj) {
+				return true;
 			}
-			extract_zip(realpath, natives_path, exclusions);
+			path = json_get_string(obj, "path");
+			url = json_get_string(obj, "url");
+			if(!path) {
+				path = microlauncher_get_library_path(name, classifier, pathbuff);
+			}
+			snprintf(realpath, PATH_MAX, "%s/%s", libraries_path, path);
+			if(!url && url_base) {
+				snprintf(url2, PATH_MAX, "%s/%s", url_base, path);
+				url = url2;
+			}
+			if(!microlauncher_fetch_artifact(
+				   url,
+				   realpath,
+				   NULL,
+				   json_get_string(obj, "sha1"),
+				   json_get_int64(obj, "size"),
+				   total_size, download_size)) {
+				snprintf(failedUrl, PATH_MAX, "%s", url);
+				return false;
+			}
+
+			obj = json_object_object_get(libObj, "extract");
+			obj = json_object_object_get(obj, "exclude");
+			if(json_object_is_type(obj, json_type_array)) {
+				size_t n = json_object_array_length(obj);
+				const char *exclusions[n + 1];
+				exclusions[n] = NULL;
+				for(size_t i = 0; i < n; i++) {
+					iter = json_object_array_get_idx(obj, i);
+					exclusions[i] = json_object_get_string(iter);
+				}
+				extract_zip(realpath, natives_path, exclusions);
+			}
 		}
 	}
 	return true;
+}
+
+json_object *merge_json_object(json_object *base, json_object *overlay, bool incrementRef) {
+	size_t n;
+	if(!overlay) {
+		return base;
+	}
+	json_object_object_foreach(overlay, key, val) {
+		json_object *overlayMember = json_object_object_get(overlay, key);
+		json_object *baseMember = json_object_object_get(base, key);
+		if(json_object_get_type(overlayMember) == json_object_get_type(baseMember)) {
+			if(json_object_is_type(baseMember, json_type_array)) {
+				n = json_object_array_length(overlayMember);
+				for(size_t i = 0; i < n; i++) {
+					json_object *iter = json_object_array_get_idx(overlayMember, i);
+					if(incrementRef) {
+						json_object_get(iter);
+					}
+					json_object_array_insert_idx(baseMember, i, iter);
+				}
+			} else {
+				if(incrementRef) {
+					json_object_get(overlayMember);
+				}
+				json_object_object_add(base, key, overlayMember);
+			}
+		} else if(baseMember == NULL) {
+			if(incrementRef) {
+				json_object_get(overlayMember);
+			}
+			json_object_object_add(base, key, overlayMember);
+		}
+	}
+	return base;
 }
 
 json_object *inherit_json(const char *versions_path, const char *id, bool allowUpdate) {
@@ -527,31 +572,31 @@ json_object *inherit_json(const char *versions_path, const char *id, bool allowU
 	}
 	snprintf(path, PATH_MAX, "%s/%s/%s.json", versions_path, id, id);
 	struct Version *version = g_hash_table_lookup(manifest, id);
-	// TODO let the user decide whenever to keep changes to local JSON or update with manifest one.
-	if(version && allowUpdate) {
+	GFile *file = g_file_new_for_path(path);
+	if(version && (allowUpdate || g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) != G_FILE_TYPE_REGULAR)) {
 		microlauncher_fetch_artifact(version->url, path, NULL, version->sha1, 0, 0, NULL);
 	}
+	g_object_unref(file);
 	json_object *thisObj = json_from_file(path);
 	if(!thisObj) {
 		return NULL;
 	}
 	json_object *obj = inherit_json(versions_path, json_get_string(thisObj, "inheritsFrom"), allowUpdate);
 	if(json_object_is_type(obj, json_type_object)) {
-		json_object_object_foreach(thisObj, key, val) {
-			json_object *thisMember = json_object_object_get(thisObj, key);
-			json_object *otherMember = json_object_object_get(obj, key);
-			if(json_object_get_type(thisMember) == json_object_get_type(otherMember)) {
-				if(json_object_is_type(otherMember, json_type_array)) {
-					for(size_t i = 0; i < json_object_array_length(thisMember); i++) {
-						json_object_array_insert_idx(otherMember, i, json_object_array_get_idx(thisMember, i));
-					}
-				} else {
-					json_object_object_add(obj, key, thisMember);
-				}
-			}
+		if(json_get_string(thisObj, "minecraftArguments")) {
+			json_object_object_del(obj, "arguments");
 		}
+		json_object *args = json_object_object_get(obj, "arguments");
+		if(args) {
+			merge_json_object(args, json_object_object_get(thisObj, "arguments"), true);
+			json_object_object_del(thisObj, "arguments");
+		}
+		merge_json_object(obj, thisObj, true);
+
+		json_object_put(thisObj);
 		return obj;
 	}
+	json_object_put(obj);
 	return thisObj;
 }
 
@@ -588,11 +633,11 @@ static bool check_rules(json_object *rules, GSList *featuresList) {
 		os = json_object_object_get(iter, "os");
 		if(json_object_is_type(os, json_type_object)) {
 			str = json_get_string(os, "name");
-			if(str && !strequal(str, OS_NAME)) {
+			if(str && !strequal(str, platform_get_name(platform_get()))) {
 				continue;
 			}
 			str = json_get_string(os, "arch");
-			if(str && !strequal(str, OS_ARCH)) {
+			if(str && !strequal(str, platform_get_arch(platform_get()))) {
 				continue;
 			}
 			// TODO Not so necessary to implement with BetterJSONs
@@ -627,7 +672,7 @@ static bool check_rules(json_object *rules, GSList *featuresList) {
 }
 
 json_object *microlauncher_fetch_version(const char *versionId, const char *versions_path, const char *libraries_path, const char *natives_path, const char *assets_dir, GCancellable *cancellable, char *failedUrl, bool allowUpdate) {
-	json_object *json, *libraries, *downloads, *artifact, *client, *iter, *assets_json, *obj;
+	json_object *json, *libraries, *downloads, *artifact, *client, *iter, *assets_json, *obj, *natives;
 	char path[PATH_MAX];
 	char url[PATH_MAX];
 	snprintf(path, PATH_MAX, "%s/%s/%s.json", versions_path, versionId, versionId);
@@ -635,6 +680,7 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 	if(!json) {
 		return NULL;
 	}
+	enum Platform plat = platform_get();
 	const char *str = json_get_string(json, "id");
 	libraries = json_object_object_get(json, "libraries");
 	downloads = json_object_object_get(json, "downloads");
@@ -657,12 +703,22 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 				total_size += json_get_int64(artifact, "size");
 			}
 
-			const char *classifier = json_get_string(json_object_object_get(iter, "natives"), OS_NAME);
-			if(classifier) {
-				obj = json_object_object_get(downloads, "classifiers");
-				obj = json_object_object_get(obj, classifier);
-				if(obj) {
-					total_size += json_get_int64(obj, "size");
+			const char *classifier;
+			natives = json_object_object_get(iter, "natives");
+			if(!natives) {
+				continue;
+			}
+			json_object_object_foreach(natives, key, val) {
+				if(!platform_is_valid_alias(plat, key)) {
+					continue;
+				}
+				classifier = json_get_string(natives, key);
+				if(classifier) {
+					obj = json_object_object_get(downloads, "classifiers");
+					obj = json_object_object_get(obj, classifier);
+					if(obj) {
+						total_size += json_get_int64(obj, "size");
+					}
 				}
 			}
 		}

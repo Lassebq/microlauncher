@@ -32,7 +32,7 @@ static PropertyDef prop_definitions[N_PROPERTIES] = {
 		G_TYPE_INT,
 		offsetof(MicrolauncherAccount, type),
 		G_PARAM_READWRITE,
-		g_free
+		NULL
 	},
 	[PROP_SESSION_UUID] = {
 		"session-uuid",
@@ -63,18 +63,14 @@ G_DEFINE_TYPE(MicrolauncherAccount, microlauncher_account, G_TYPE_OBJECT)
 static void microlauncher_account_init(MicrolauncherAccount *self) {
 	for(guint i = 1; i < N_PROPERTIES; i++) {
 		PropertyDef def = prop_definitions[i];
-		if(def.name) {
-			*(void **)offset_apply(self, def.memberOffs) = NULL;
-		}
+		gobj_util_init_prop(G_OBJECT(self), def);
 	}
 }
 
 void microlauncher_account_dispose(GObject *self) {
 	for(guint i = 1; i < N_PROPERTIES; i++) {
 		PropertyDef def = prop_definitions[i];
-		if(def.name) {
-			g_clear_pointer((void **)offset_apply(self, def.memberOffs), def.free_func);
-		}
+		gobj_util_dispose_prop(self, def);
 	}
 	G_OBJECT_CLASS(microlauncher_account_parent_class)->dispose(self);
 }

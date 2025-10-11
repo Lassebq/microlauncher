@@ -16,6 +16,109 @@
 #include <util/util.h>
 #include <zip.h>
 
+static const char *OS_NAMES[][4] = {
+	[OS_WINDOWS_X86] = {"windows-x86"},
+	[OS_WINDOWS_X86_64] = {"windows", "windows-x64", "windows-x86_64"},
+	[OS_WINDOWS_ARM64] = {"windows-arm64", "windows-aarch64"},
+	[OS_LINUX_X86] = {"linux-i386", "linux-x86"},
+	[OS_LINUX_X86_64] = {"linux", "linux-x86_64"},
+	[OS_LINUX_ARM] = {"linux-arm", "linux-armv7"},
+	[OS_LINUX_ARM64] = {"linux-aarch64", "linux-arm64"},
+	[OS_MACOS_X86_64] = {"osx", "osx-x64", "mac-os", "mac-os-x64"},
+	[OS_MACOS_ARM64] = {"osx-aarch64", "osx-arm64", "mac-os-aarch64", "mac-os-arm64"}
+
+};
+
+enum Platform platform_get(void) {
+#ifdef _WIN32
+#ifdef OS_ARCH_X86
+	return OS_WINDOWS_X86;
+#elif defined(OS_ARCH_X86_64)
+	return OS_WINDOWS_X86_64;
+#elif defined(OS_ARCH_ARM64)
+	return OS_WINDOWS_ARM64;
+#else
+#error "Unsupported Windows architecture"
+#endif
+#elif defined(__linux__)
+#ifdef OS_ARCH_X86
+	return OS_LINUX_X86;
+#elif defined(OS_ARCH_X86_64)
+	return OS_LINUX_X86_64;
+#elif defined(OS_ARCH_ARM)
+	return OS_LINUX_ARM;
+#elif defined(OS_ARCH_ARM64)
+	return OS_LINUX_ARM64;
+#else
+#error "Unsupported Linux architecture"
+#endif
+#elif defined(__APPLE__)
+#ifdef OS_ARCH_X86_64
+	return OS_MACOS_X86_64;
+#elif defined(OS_ARCH_ARM64)
+	return OS_MACOS_ARM64;
+#else
+#error "Unsupported MacOS architecture"
+#endif
+#else
+#error "Unsupported OS"
+#endif
+}
+
+const char *platform_get_name(enum Platform platform) {
+	// Should match os.name in JVM
+	switch(platform) {
+		case OS_WINDOWS_X86:
+		case OS_WINDOWS_X86_64:
+		case OS_WINDOWS_ARM64:
+			return "windows";
+		case OS_LINUX_X86:
+		case OS_LINUX_X86_64:
+		case OS_LINUX_ARM:
+		case OS_LINUX_ARM64:
+			return "linux";
+		case OS_MACOS_X86_64:
+		case OS_MACOS_ARM64:
+			return "osx";
+		default:
+			return "unknown";
+	}
+}
+
+const char *platform_get_arch(enum Platform platform) {
+	// Should match os.arch in JVM
+	switch(platform) {
+		case OS_WINDOWS_X86_64:
+		case OS_LINUX_X86_64:
+		case OS_MACOS_X86_64:
+			return "amd64";
+		case OS_WINDOWS_X86:
+			return "x86";
+		case OS_LINUX_X86:
+			return "i386";
+		case OS_WINDOWS_ARM64:
+		case OS_LINUX_ARM64:
+		case OS_MACOS_ARM64:
+			return "aarch64";
+		case OS_LINUX_ARM:
+			return "arm";
+		default:
+			return "unknown";
+	}
+}
+
+bool platform_is_valid_alias(enum Platform platform, const char *alias) {
+	for(int i = 0; i < 4; i++) {
+		if(OS_NAMES[i] == NULL) {
+			return false;
+		}
+		if(strequal(OS_NAMES[platform][i], alias)) {
+			return true;
+		}
+	}
+	return false;
+}
+
 String string_new_n(int n) {
 	String string = {
 		.length = 0,
@@ -428,12 +531,12 @@ char **get_commandv(char *cmdline) {
 
 char *util_str_execv(const char *dir, char *const *argv) {
 	String str;
+#ifndef G_OS_WIN32
 	int pipefd[2];
 	if(pipe(pipefd) == -1) {
 		return NULL;
 	}
 
-#ifndef G_OS_WIN32
 	GPid pid = fork();
 	if(pid == -1) {
 		close(pipefd[0]);
@@ -462,8 +565,43 @@ char *util_str_execv(const char *dir, char *const *argv) {
 		string_append_n(&str, buffer, bytes_read);
 	}
 	close(pipefd[0]);
-	return str.data;
+#else
+	HANDLE hReadPipe, hWritePipe;
+	SECURITY_ATTRIBUTES sa;
+	STARTUPINFO si = {0};
+	PROCESS_INFORMATION pi = {0};
+
+	sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+	sa.bInheritHandle = TRUE;
+	sa.lpSecurityDescriptor = NULL;
+
+	if(!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0)) {
+		return NULL;
+	}
+	si.hStdError = hWritePipe;
+	si.hStdOutput = hWritePipe;
+	si.dwFlags |= STARTF_USESTDHANDLES;
+	char *cmdline = get_escaped_command(argv);
+	if(!CreateProcessA(NULL, cmdline, NULL, NULL, true, CREATE_NO_WINDOW, NULL, dir, &si, &pi)) {
+		CloseHandle(hReadPipe);
+		CloseHandle(hWritePipe);
+		return NULL;
+	}
+	CloseHandle(hWritePipe);
+
+	char buffer[BUFSIZ];
+	unsigned long bytes_read;
+	str = string_new(NULL);
+	while(ReadFile(hReadPipe, buffer, sizeof(buffer), &bytes_read, NULL) && bytes_read != 0) {
+		string_append_n(&str, buffer, bytes_read);
+	}
+	WaitForSingleObject(pi.hProcess, INFINITE);
+
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+	CloseHandle(hReadPipe);
 #endif
+	return str.data;
 }
 
 GPid util_fork_execv(const char *dir, char *const *argv) {
@@ -481,7 +619,7 @@ GPid util_fork_execv(const char *dir, char *const *argv) {
 	STARTUPINFO si = {0};
 	PROCESS_INFORMATION pi = {0};
 	char *cmdline = get_escaped_command(argv);
-	if(CreateProcessA(NULL, cmdline, NULL, NULL, false, 0, NULL, dir, &si, &pi)) {
+	if(CreateProcessA(NULL, cmdline, NULL, NULL, false, CREATE_NO_WINDOW, NULL, dir, &si, &pi)) {
 		CloseHandle(pi.hThread);
 		return pi.hProcess;
 	} else {

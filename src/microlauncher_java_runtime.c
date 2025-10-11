@@ -74,6 +74,10 @@ static void get_property(GObject *object, guint property_id, GValue *value, GPar
 		// 		}
 		// #endif
 		char *out = util_str_execv(NULL, (char *[]){self->location, "-version", NULL});
+		if(!out) {
+			return;
+		}
+		// g_print("%s", out);
 		int minStr, maxStr;
 		char *str, *str2;
 		str = strstr(out, "version ");
