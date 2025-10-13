@@ -136,14 +136,23 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/io.github.lassebq.microlauncher.deskt
 
 install(TARGETS microlauncher BUNDLE DESTINATION . TYPE RUNTIME)
 if(WIN32)
-
-    message(STATUS "${CMAKE_INSTALL_PREFIX}")
-    foreach(path IN LISTS CMAKE_FIND_ROOT_PATH)
-        if(EXISTS ${path}/share/glib-2.0/schemas)
-            install(DIRECTORY ${path}/share/glib-2.0/schemas DESTINATION share/glib-2.0)
-            break()
-        endif()
+    set(SCHEMAS_TO_INSTALL
+        org.gtk.gtk4.Settings.ColorChooser.gschema.xml
+        org.gtk.gtk4.Settings.Debug.gschema.xml
+        org.gtk.gtk4.Settings.EmojiChooser.gschema.xml
+        org.gtk.gtk4.Settings.FileChooser.gschema.xml
+        org.gtk.gtk4.Inspector.gschema.xml
+    )
+    foreach(schema IN LISTS SCHEMAS_TO_INSTALL)
+        find_file(path NO_CACHE "share/glib-2.0/schemas/${schema}")
+        message(STATUS "GLib schema found: ${path}")
+        install(FILES "${path}" DESTINATION share/glib-2.0/schemas)
+        unset(path)
     endforeach()
+    install(CODE [[
+        find_program(GLIB_COMPILE_SCHEMAS NAMES glib-compile-schemas "glib-compile-schemas.exe")
+        execute_process(COMMAND ${GLIB_COMPILE_SCHEMAS} ${CMAKE_INSTALL_PREFIX}/share/glib-2.0/schemas)
+    ]])
     install(CODE "set(CMAKE_SYSTEM_LIBRARY_PATH \"${CMAKE_SYSTEM_LIBRARY_PATH}\")")
 
     install(CODE [[
@@ -164,6 +173,10 @@ if(WIN32)
     ]])
     set(CMAKE_FIND_LIBRARY_SUFFIXES .dll)
     find_library(dep NAMES Lerc NO_CACHE REQUIRED)
+    install(PROGRAMS ${dep} DESTINATION bin)
+
+    unset(dep)
+    find_library(dep NAMES crypto-3-x64 NO_CACHE REQUIRED)
     install(PROGRAMS ${dep} DESTINATION bin)
 
 endif()
