@@ -5,7 +5,7 @@
 #include <pwd.h>
 #endif
 
-#if _WIN32
+#ifdef G_OS_WIN32
 #include <shlobj.h>
 #include <windows.h>
 #endif

@@ -16,17 +16,24 @@ pacman -Sy gtk4 glib2 util-linux-libs json-c curl libzip openssl imagemagick bas
 
 ### Fedora Linux:
 ```
-dnf install gtk4 json-c libzip gtk4-devel json-c-devel libzip-devel pciutils pciutils-devel ImageMagick pkgconf cmake
+dnf install gtk4 json-c libzip gtk4-devel json-c-devel libzip-devel pciutils pciutils-devel libcurl-devel ImageMagick pkgconf cmake
 ```
 
-### Alpine Linux
+### Alpine Linux:
 ```
-apk add gtk4.0-dev json-c-dev libzip-dev pciutils-dev imagemagick pkgconf cmake
+apk upgrade
+apk add gtk4.0-dev json-c-dev libzip-dev pciutils-dev curl-dev imagemagick pkgconf cmake
+```
+
+### Ubuntu Linux:
+```
+apt update
+apt install -y libgtk-4-dev libjson-c-dev libzip-dev libpci-dev imagemagick pkgconf libcurl4-openssl-dev
 ```
 
 ### MSYS2 with MinGW:
 ```
-pacman -Sy mingw-w64-x86_64-gtk4 mingw-w64-x86_64-glib2 mingw-w64-x86_64-json-c mingw-w64-x86_64-curl-winssl mingw-w64-x86_64-libzip mingw-w64-x86_64-openssl mingw-w64-x86_64-imagemagick
+pacman -Sy mingw-w64-x86_64-gtk4 mingw-w64-x86_64-glib2 mingw-w64-x86_64-json-c mingw-w64-x86_64-curl-winssl mingw-w64-x86_64-libzip mingw-w64-x86_64-openssl mingw-w64-x86_64-imagemagick mingw-w64-x86_64-icoutils mingw-w64-x86_64-pkgconf mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake
 ```
 
 ### macOS:

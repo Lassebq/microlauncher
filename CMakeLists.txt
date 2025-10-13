@@ -136,30 +136,34 @@ install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/io.github.lassebq.microlauncher.deskt
 
 install(TARGETS microlauncher BUNDLE DESTINATION . TYPE RUNTIME)
 if(WIN32)
+
+    message(STATUS "${CMAKE_INSTALL_PREFIX}")
+    foreach(path IN LISTS CMAKE_FIND_ROOT_PATH)
+        if(EXISTS ${path}/share/glib-2.0/schemas)
+            install(DIRECTORY ${path}/share/glib-2.0/schemas DESTINATION share/glib-2.0)
+            break()
+        endif()
+    endforeach()
     install(CODE "set(CMAKE_SYSTEM_LIBRARY_PATH \"${CMAKE_SYSTEM_LIBRARY_PATH}\")")
-    
+
     install(CODE [[
-        set(OBJDUMP_BIN ${CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND})
-        set(CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND "./objdump_unix2dos.sh")
-
-        file(WRITE "objdump_unix2dos.sh" "${OBJDUMP_BIN} $@ | unix2dos")
-        file(CHMOD "objdump_unix2dos.sh" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-
+        message(STATUS ${CMAKE_SYSTEM_LIBRARY_PATH})
         file(GET_RUNTIME_DEPENDENCIES
-        RESOLVED_DEPENDENCIES_VAR deps_resolved
-        UNRESOLVED_DEPENDENCIES_VAR deps_unresolved
-        LIBRARIES $<TARGET_FILE:microlauncher>
-        DIRECTORIES ${CMAKE_SYSTEM_LIBRARY_PATH}
-        PRE_EXCLUDE_REGEXES "api-ms-*" "ext-ms-*"
-        POST_EXCLUDE_REGEXES ".*system32/.*\\.dll"
+            RESOLVED_DEPENDENCIES_VAR deps_resolved
+            UNRESOLVED_DEPENDENCIES_VAR deps_unresolved
+            LIBRARIES "$<TARGET_FILE:microlauncher>"
+            DIRECTORIES ${CMAKE_SYSTEM_LIBRARY_PATH}
+            PRE_EXCLUDE_REGEXES "api-ms-*" "ext-ms-*" "^opengl32\\.dll$"
+            POST_EXCLUDE_REGEXES ".*system32/.*\\.dll"
         )
-        # message(STATUS "Resolved deps: ${deps_resolved}")
-        # message(STATUS "Unresolved deps: ${deps_unresolved}")
+        message(STATUS "Resolved deps: ${deps_resolved}")
+        message(STATUS "Unresolved deps: ${deps_unresolved}")
         foreach(dep ${deps_resolved})
-        file(INSTALL ${dep} DESTINATION bin)
+            file(INSTALL ${dep} DESTINATION ${CMAKE_INSTALL_PREFIX}/bin)
         endforeach()
     ]])
-    
-    install(DIRECTORY ${CMAKE_FIND_ROOT_PATH}/share/glib-2.0/schemas DESTINATION share/glib-2.0)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .dll)
+    find_library(dep NAMES Lerc NO_CACHE REQUIRED)
+    install(PROGRAMS ${dep} DESTINATION bin)
 
 endif()

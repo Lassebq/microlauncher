@@ -1,5 +1,6 @@
 build/
 build_*/
+pkg/
 .vscode/
 .cache/
 .DS_Store

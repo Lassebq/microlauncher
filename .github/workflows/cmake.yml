@@ -1,0 +1,68 @@
+name: CMake build
+
+on: workflow_dispatch
+
+env:
+  # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
+  BUILD_TYPE: Release
+
+jobs:
+  build_windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MinGW and depndencies
+        uses: msys2/setup-msys2@v2
+        with:
+          path-type: inherit
+          msystem: mingw64
+          install: mingw-w64-x86_64-gtk4 mingw-w64-x86_64-glib2 mingw-w64-x86_64-json-c mingw-w64-x86_64-curl-winssl mingw-w64-x86_64-libzip mingw-w64-x86_64-openssl mingw-w64-x86_64-imagemagick mingw-w64-x86_64-icoutils mingw-w64-x86_64-pkgconf mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake
+
+      - name: Configure CMake
+        working-directory: ${{github.workspace}}
+        run: cmake -B build -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+
+      - name: Build
+        working-directory: ${{github.workspace}}
+        run: cmake --build build --config ${{env.BUILD_TYPE}}
+
+      - name: Install
+        working-directory: ${{github.workspace}}
+        run: cmake --install build --prefix pkg
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: microlauncher-windows-x86_64
+          path: ${{github.workspace}}/pkg
+
+  build_linux:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y libgtk-4-dev libjson-c-dev libzip-dev libpci-dev imagemagick pkgconf libcurl4-openssl-dev
+
+      - name: Configure CMake
+        run: cmake -B ${{github.workspace}}/build -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+
+      - name: Build
+        run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+
+      - name: Install
+        run: cmake --install ${{github.workspace}}/build --prefix ${{github.workspace}}/pkg
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: microlauncher-linux-x86_64
+          path: pkg
