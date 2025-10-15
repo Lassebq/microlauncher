@@ -1941,6 +1941,12 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	gtk_stack_add_titled(stack, microlauncher_gui_page_launcher(), "launcher", "Launcher");
 	gtk_stack_add_titled(stack, microlauncher_gui_page_instances(), "instances", "Instances");
 	gtk_stack_add_titled(stack, microlauncher_gui_page_accounts(), "accounts", "Accounts");
+	GtkWidget *stackSwitcherButton = gtk_widget_get_first_child(GTK_WIDGET(stackSwitcher));
+	while(stackSwitcherButton) {
+		// This class limits min-width to 100px. It hurts accessibility in mobile layout and forces window to be larger than screen
+		gtk_widget_remove_css_class(stackSwitcherButton, "text-button");
+		stackSwitcherButton = gtk_widget_get_next_sibling(stackSwitcherButton);
+	}
 	gtk_widget_set_vexpand(widget, true);
 	gtk_box_append(GTK_BOX(box), widget);
 
