@@ -34,17 +34,20 @@ pkg_check_modules(PKGCONF REQUIRED ${DEPS})
 pkg_check_modules(LIBPCI libpci)
 
 set(ICON_RES 48 64 128 256 512)
+set(ICON_RES_INSTALLER 48 64 128)
+set(ICON_SRC_INST_OVERLAY ${CMAKE_CURRENT_SOURCE_DIR}/assets/install_overlay.png)
 set(ICON_SRC ${CMAKE_CURRENT_SOURCE_DIR}/assets/render_1024x1024.png)
 set(ICONS_DIR ${CMAKE_CURRENT_BINARY_DIR}/icon)
 if(APPLE)
-    set(ICON_OUT ${CMAKE_CURRENT_BINARY_DIR}/icon.icns)
-    set(ICONS_DIR ${CMAKE_CURRENT_BINARY_DIR}/icon.iconset)
+    set(ICON_OUT "${CMAKE_CURRENT_BINARY_DIR}/icon.icns")
+    set(ICONS_DIR "${CMAKE_CURRENT_BINARY_DIR}/icon.iconset")
 elseif(WIN32)
-    set(ICON_OUT ${CMAKE_CURRENT_BINARY_DIR}/icon.ico)
+    set(ICON_OUT "${CMAKE_CURRENT_BINARY_DIR}/icon.ico")
+    set(ICON_OUT_INST "${CMAKE_CURRENT_BINARY_DIR}/icon_inst.ico")
 endif()
 
 find_program(MAGICK NAMES "magick" "convert" "magick.exe" "convert.exe")
-find_program(ICOTOOl NAMES "icotool" "icotool.exe")
+find_program(ICOTOOL NAMES "icotool" "icotool.exe")
 if(APPLE)
     if(NOT MAGICK) # Fall back to Apple's scriptable image processing system
         find_program(SIPS sips)
@@ -72,13 +75,53 @@ foreach(res IN LISTS ICON_RES)
 
     install(FILES "${ICONS_DIR}/icon_${res}x${res}.png" DESTINATION "share/icons/hicolor/${res}x${res}/apps" RENAME "io.github.lassebq.microlauncher.png")
 endforeach()
-add_custom_target(icons ALL DEPENDS ${PNG_ICONS})
+if(WIN32 AND MAGICK)
+    foreach(res IN LISTS ICON_RES_INSTALLER)
+        list(APPEND ICON_PNGS_INST "${ICONS_DIR}/icon_inst_${res}x${res}.png")
+        add_custom_command(
+            OUTPUT "${ICONS_DIR}/icon_inst_${res}x${res}.png"
+            COMMAND ${MAGICK} ${ICON_SRC} -filter Catrom -resize "${res}x${res}" ${ICON_SRC_INST_OVERLAY} -filter Point -resize "${res}x${res}" -composite "${ICONS_DIR}/icon_inst_${res}x${res}.png"
+            DEPENDS ${ICON_SRC} ${ICON_SRC_INST_OVERLAY}
+        )
+    endforeach()
+endif()
+
+list(APPEND IMAGES_TARGET ${PNG_ICONS})
+if(WIN32)
+    list(APPEND IMAGES_TARGET ${ICON_PNGS_INST})
+    list(APPEND IMAGES_TARGET ${ICON_OUT_INST})
+    list(APPEND IMAGES_TARGET "${CMAKE_CURRENT_BINARY_DIR}/nsis_header.bmp")
+    list(APPEND IMAGES_TARGET "${CMAKE_CURRENT_BINARY_DIR}/nsis_welcome.bmp")
+endif()
+
+add_custom_target(images ALL DEPENDS ${IMAGES_TARGET})
 
 if(WIN32)
     add_custom_command(
         OUTPUT ${ICON_OUT}
-        COMMAND ${ICOTOOl} -c ${ICON_PNGS} -o ${ICON_OUT}
+        COMMAND ${ICOTOOL} -c ${ICON_PNGS} -o ${ICON_OUT}
         DEPENDS ${ICON_PNGS} 
+    )
+    add_custom_command(
+        OUTPUT ${ICON_OUT_INST}
+        COMMAND ${ICOTOOL} -c ${ICON_PNGS_INST} -o ${ICON_OUT_INST}
+        DEPENDS ${ICON_PNGS_INST} 
+    )
+    set(LEFT_PARENTHESIS "(")
+    set(RIGHT_PARENTHESIS ")")
+    if(CMAKE_CROSSCOMPILING)
+        set(LEFT_PARENTHESIS "\\(")
+        set(RIGHT_PARENTHESIS "\\)")
+    endif()
+    add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/nsis_header.bmp"
+        COMMAND ${MAGICK} -size 150x57 xc:white -append "${LEFT_PARENTHESIS}" "${ICON_SRC}" -filter Catrom -resize 48x48 -geometry +5+5 "${RIGHT_PARENTHESIS}" -composite -depth 8 -compress none "BMP3:${CMAKE_CURRENT_BINARY_DIR}/nsis_header.bmp"
+        DEPENDS ${ICON_SRC}
+    )
+    add_custom_command(
+        OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/nsis_welcome.bmp"
+        COMMAND ${MAGICK} -size 164x314 xc:white -append "${LEFT_PARENTHESIS}" "${ICON_SRC}" -filter Catrom -resize 128x128 -geometry +20+80 "${RIGHT_PARENTHESIS}" -composite -depth 8 -compress none "BMP3:${CMAKE_CURRENT_BINARY_DIR}/nsis_welcome.bmp"
+        DEPENDS ${ICON_SRC}
     )
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/icon.rc" [[IDI_ICON1 ICON "icon.ico"]])
     list(APPEND SOURCES "${CMAKE_CURRENT_BINARY_DIR}/icon.rc")
@@ -135,7 +178,20 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BUILD_DIR})
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/io.github.lassebq.microlauncher.desktop" DESTINATION share/applications)
 
 install(TARGETS microlauncher BUNDLE DESTINATION . TYPE RUNTIME)
+
 if(WIN32)
+    set(CPACK_GENERATOR "NSIS")
+    set(CPACK_PACKAGE_NAME "MicroLauncher")
+    set(CPACK_PACKAGE_VENDOR "Lassebq")
+    set(CPACK_PACKAGE_VERSION "${CMAKE_PROJECT_VERSION}")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "MicroLauncher is a Minecraft launcher.")
+    set(CPACK_PACKAGE_EXECUTABLES "microlauncher" "MicroLauncher")
+    set(CPACK_NSIS_MUI_ICON "${ICON_OUT_INST}")
+    set(CPACK_NSIS_MUI_HEADERIMAGE ${CMAKE_CURRENT_BINARY_DIR}/nsis_header.bmp)
+    set(CPACK_NSIS_MUI_WELCOMEFINISHPAGE_BITMAP ${CMAKE_CURRENT_BINARY_DIR}/nsis_welcome.bmp)
+    set(CPACK_NSIS_DISPLAY_NAME "MicroLauncher ${CMAKE_PROJECT_VERSION} Installer")
+    set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
+    include(CPack)
     set(SCHEMAS_TO_INSTALL
         org.gtk.gtk4.Settings.ColorChooser.gschema.xml
         org.gtk.gtk4.Settings.Debug.gschema.xml
