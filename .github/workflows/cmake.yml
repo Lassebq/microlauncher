@@ -104,3 +104,31 @@ jobs:
         with:
           name: microlauncher-macos-x86_64
           path: pkg
+
+  build_macos_arm:
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Homebrew
+        id: set-up-homebrew
+        uses: Homebrew/actions/setup-homebrew@main
+
+      - name: Install dependencies
+        run: brew install gtk4 json-c libzip imagemagick pkgconf cmake
+
+      - name: Configure CMake
+        run: cmake -B ${{github.workspace}}/build -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}}
+
+      - name: Build
+        run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+
+      - name: Install
+        run: cmake --install ${{github.workspace}}/build --prefix ${{github.workspace}}/pkg
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: microlauncher-macos-aarch64
+          path: pkg
