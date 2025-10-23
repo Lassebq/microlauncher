@@ -1173,7 +1173,8 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	for(int i = 0; i < c; i++) {
 		g_print("%s\n", argv[i]);
 	}
-	GPid pid = util_fork_execv(instance->location, argv);
+	// umask 002 for less restrictive permissions when using shared between users instances
+	GPid pid = util_fork_execv(instance->location, argv, 0002);
 
 	run_callback(instance_started, pid);
 	int status = 0;

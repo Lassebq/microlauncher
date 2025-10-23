@@ -393,14 +393,18 @@ static void create_or_modify_instance(GtkButton *button, void *userdata) {
 
 // I should not need to workaround this once the approriate GTK bug is fixed. https://gitlab.gnome.org/GNOME/gtk/-/issues/6747
 struct TryScroll {
-	GtkColumnView *colView;
+	void *view;
 	guint row;
 };
 
 static gboolean try_scroll_to(struct TryScroll *tryScroll) {
 	GtkScrollInfo *scrollInfo = gtk_scroll_info_new();
 	gtk_scroll_info_set_enable_vertical(scrollInfo, true);
-	gtk_column_view_scroll_to(tryScroll->colView, tryScroll->row, NULL, GTK_LIST_SCROLL_SELECT | GTK_LIST_SCROLL_FOCUS, scrollInfo);
+	if(GTK_IS_COLUMN_VIEW(tryScroll->view)) {
+		gtk_column_view_scroll_to(tryScroll->view, tryScroll->row, NULL, GTK_LIST_SCROLL_SELECT | GTK_LIST_SCROLL_FOCUS, scrollInfo);
+	} else if(GTK_IS_LIST_VIEW(tryScroll->view)) {
+		gtk_list_view_scroll_to(tryScroll->view, tryScroll->row, GTK_LIST_SCROLL_SELECT | GTK_LIST_SCROLL_FOCUS, scrollInfo);
+	}
 	return false;
 }
 
@@ -661,7 +665,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	gtk_box_append(container, widget);
 
 	struct TryScroll *tryScroll = g_new0(struct TryScroll, 1);
-	tryScroll->colView = columnView;
+	tryScroll->view = columnView;
 	if(instance) {
 		guint n = g_list_model_get_n_items(G_LIST_MODEL(model));
 		for(guint i = 0; i < n; i++) {
@@ -753,15 +757,23 @@ static void microlauncher_gui_refresh_instance(void) {
 		gtk_box_append(GTK_BOX(box), widget);
 	}
 
-	widget = gtk_button_new_with_label("Change");
+	widget = gtk_button_new_with_label("Select");
 	g_signal_connect(widget, "clicked", G_CALLBACK(microlauncher_gui_switch_to_tab), "instances");
-	gtk_widget_set_margin(widget, 0, 0, 10, 0);
+	gtk_widget_set_margin(widget, 0, 5, 10, 0);
 	gtk_widget_set_valign(widget, GTK_ALIGN_CENTER);
 	gtk_widget_set_halign(widget, GTK_ALIGN_END);
 	gtk_widget_set_hexpand(widget, true);
 	if(settings->instance) {
-		gtk_grid_attach(titleArea, widget, 2, 0, 1, 2);
+		gtk_grid_attach(titleArea, widget, 2, 0, 1, 1);
 		gtk_frame_set_label(instanceFrame, "Instance");
+
+		widget = gtk_button_new_with_label("Modify");
+		g_signal_connect(widget, "clicked", G_CALLBACK(microlauncher_modify_instance_window), settings->instance);
+		gtk_widget_set_margin(widget, 0, 10, 10, 0);
+		gtk_widget_set_valign(widget, GTK_ALIGN_CENTER);
+		gtk_widget_set_halign(widget, GTK_ALIGN_END);
+		gtk_widget_set_hexpand(widget, true);
+		gtk_grid_attach(titleArea, widget, 2, 1, 1, 1);
 	} else {
 		gtk_box_append(GTK_BOX(box), widget);
 		gtk_frame_set_label(instanceFrame, NULL);
@@ -785,7 +797,7 @@ static void microlauncher_gui_refresh_instance(void) {
 		gtk_widget_add_css_class(widget, "title-2");
 		gtk_box_append(GTK_BOX(box), widget);
 	}
-	widget = gtk_button_new_with_label("Change");
+	widget = gtk_button_new_with_label("Select");
 	g_signal_connect(widget, "clicked", G_CALLBACK(microlauncher_gui_switch_to_tab), "accounts");
 	gtk_widget_set_valign(widget, GTK_ALIGN_CENTER);
 	gtk_widget_set_halign(widget, GTK_ALIGN_END);
@@ -1910,6 +1922,22 @@ static void init_gpus(void) {
 #endif
 }
 
+static void on_launcher_stack_page_changed(GObject *obj, GParamSpec *pspec, gpointer user_data) {
+	GtkStack *stack = GTK_STACK(obj);
+	const char *t = gtk_stack_get_visible_child_name(stack);
+	if(strequal(t, "instances")) {
+		struct TryScroll *tryScroll = g_new0(struct TryScroll, 1);
+		tryScroll->view = instancesView;
+		tryScroll->row = gtk_single_selection_get_selected(GTK_SINGLE_SELECTION(gtk_list_view_get_model(instancesView)));
+		g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, (GSourceFunc)try_scroll_to, tryScroll, g_free);
+	} else if(strequal(t, "accounts")) {
+		struct TryScroll *tryScroll = g_new0(struct TryScroll, 1);
+		tryScroll->view = accountsView;
+		tryScroll->row = gtk_single_selection_get_selected(GTK_SINGLE_SELECTION(gtk_list_view_get_model(accountsView)));
+		g_idle_add_full(G_PRIORITY_DEFAULT_IDLE, (GSourceFunc)try_scroll_to, tryScroll, g_free);
+	}
+}
+
 static void activate(GtkApplication *app, gpointer user_data) {
 	GtkWidget *widget, *box;
 	GtkCssProvider *provider = gtk_css_provider_new();
@@ -1936,6 +1964,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	widget = gtk_stack_new();
 	GtkStack *stack = GTK_STACK(widget);
 	launcherStack = stack;
+	g_signal_connect(stack, "notify::visible-child", G_CALLBACK(on_launcher_stack_page_changed), NULL);
 	gtk_stack_switcher_set_stack(stackSwitcher, stack);
 	gtk_stack_set_transition_type(stack, GTK_STACK_TRANSITION_TYPE_SLIDE_LEFT_RIGHT);
 	gtk_stack_add_titled(stack, microlauncher_gui_page_launcher(), "launcher", "Launcher");
@@ -1962,10 +1991,12 @@ static void activate(GtkApplication *app, gpointer user_data) {
 
 	widget = gtk_label_new("");
 	progressStage = GTK_LABEL(widget);
+	gtk_label_set_ellipsize(progressStage, PANGO_ELLIPSIZE_END);
 	gtk_box_append(progressBox, widget);
 
 	widget = gtk_progress_bar_new();
 	progressBar = GTK_PROGRESS_BAR(widget);
+	gtk_progress_bar_set_ellipsize(progressBar, PANGO_ELLIPSIZE_END);
 	gtk_widget_set_margin(widget, 0, 10, 10, 10);
 	gtk_progress_bar_set_show_text(progressBar, true);
 	gtk_box_append(progressBox, widget);

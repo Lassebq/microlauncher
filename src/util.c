@@ -1,5 +1,7 @@
 #include <glib.h>
 #include <glib/gstdio.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #ifdef G_OS_UNIX
 #include <sys/wait.h>
 #include <unistd.h>
@@ -604,13 +606,14 @@ char *util_str_execv(const char *dir, char *const *argv) {
 	return str.data;
 }
 
-GPid util_fork_execv(const char *dir, char *const *argv) {
+GPid util_fork_execv(const char *dir, char *const *argv, mode_t u_mask) {
 #ifndef G_OS_WIN32
 	GPid pid = fork();
 	if(pid == 0) {
 		if(dir) {
 			chdir(dir);
 		}
+		umask(u_mask);
 		execvp(argv[0], argv);
 		_exit(EXIT_FAILURE);
 	}

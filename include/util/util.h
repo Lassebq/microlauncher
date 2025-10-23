@@ -1,6 +1,7 @@
 #pragma once
 
 #include <glib.h>
+#include <sys/types.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -106,7 +107,7 @@ char *get_escaped_command(char *const *cmdline);
 
 char **get_commandv(char *cmdline);
 
-GPid util_fork_execv(const char *dir, char *const *argv);
+GPid util_fork_execv(const char *dir, char *const *argv, mode_t umask);
 
 char *util_str_execv(const char *dir, char *const *argv);
 
