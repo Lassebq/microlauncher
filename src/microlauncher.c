@@ -1,3 +1,6 @@
+#include "gdk/gdk.h"
+#include "glib/gstdio.h"
+#include "gtk/gtk.h"
 #include "microlauncher_java_runtime.h"
 #include <curl/curl.h>
 #include <curl/easy.h>
@@ -40,6 +43,17 @@ char *EXEC_BINARY;
 static char *active_instance = NULL;
 static char *active_user = NULL;
 static bool use_saved_user = false;
+
+#ifdef G_OS_WIN32
+const char *JVM_LOCATIONS[] = {"C:/Program Files/Java/*/bin/java.exe", NULL};
+#elif defined(G_OS_UNIX)
+const char *JVM_LOCATIONS[] = {
+	"/usr/local/lib/jvm/*/bin/java",
+	"/usr/lib/jvm/*/bin/java",
+	NULL};
+#elif defined(__APPLE__)
+const char *JVM_LOCATIONS[] = {"/Library/Java/JavaVirtualMachines/*/Contents/Home/bin/java", NULL};
+#endif
 
 static GOptionEntry entries[] =
 	{
@@ -832,8 +846,52 @@ struct Settings *microlauncher_get_settings(void) {
 	return &settings;
 }
 
-static void *load_runtimes(json_object *elem) {
-	JavaRuntime *runtime = microlauncher_java_runtime_new(json_get_string(elem, "version"), json_get_string(elem, "location"));
+static void load_default_runtimes(void) {
+	char path[PATH_MAX];
+	const char **jvmDir = JVM_LOCATIONS;
+	char *dir;
+	const char *suffix;
+	gsize len;
+	for(; *jvmDir; jvmDir++) {
+		suffix = strchr(*jvmDir, '*');
+		if(!suffix) {
+			continue;
+		}
+		len = suffix - (*jvmDir);
+		dir = g_strndup(*jvmDir, len);
+		dir[len - 1] = '\0';
+		suffix++;
+		GDir *gdir = g_dir_open(dir, 0, NULL);
+		if(!gdir) {
+			continue;
+		}
+		const char *entry;
+		while((entry = g_dir_read_name(gdir))) {
+			char *full_path = g_build_filename(dir, entry, suffix, NULL);
+			realpath(full_path, path);
+			free(full_path);
+			if(g_file_query_file_type(g_file_new_for_path(path), 0, NULL) == G_FILE_TYPE_REGULAR) {
+				GSList *data = settings.javaRuntimes;
+				while(data) {
+					JavaRuntime *runtime = data->data;
+					if(strequal(runtime->location, path)) {
+						break;
+					}
+					data = data->next;
+				}
+				// We left inner loop early
+				if(data) {
+					continue;
+				}
+				JavaRuntime *runtime = microlauncher_java_runtime_new(path);
+				settings.javaRuntimes = g_slist_append(settings.javaRuntimes, runtime);
+			}
+		}
+	}
+}
+
+static void *load_runtime(json_object *elem) {
+	JavaRuntime *runtime = microlauncher_java_runtime_new(json_object_get_string(elem));
 	return runtime;
 }
 
@@ -849,10 +907,14 @@ void microlauncher_load_settings(void) {
 	settings.width = json_get_int(obj, "width");
 	settings.height = json_get_int(obj, "height");
 	settings.gpu_id = g_strdup(getenv("DRI_PRIME"));
-	load_list(json_object_object_get(obj, "javaRuntimes"), &settings.javaRuntimes, load_runtimes);
+	load_list(json_object_object_get(obj, "javaRuntimes"), &settings.javaRuntimes, load_runtime);
+
+	load_default_runtimes();
+
 	if(!settings.gpu_id) {
 		settings.gpu_id = g_strdup(json_get_string(obj, "gpu"));
 	}
+
 	const char *root = getenv("MICROLAUNCHER_LAUNCHER_ROOT");
 	if(root) {
 		settings.launcher_root = g_strdup(root);
@@ -872,9 +934,7 @@ void microlauncher_load_settings(void) {
 
 static json_object *write_runtimes(void *data) {
 	JavaRuntime *runtime = data;
-	json_object *obj = json_object_new_object();
-	json_set_string(obj, "version", runtime->version);
-	json_set_string(obj, "location", runtime->location);
+	json_object *obj = json_object_new_string(runtime->location);
 	return obj;
 }
 
@@ -1030,6 +1090,26 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	if(!microlauncher_auth_user(user, cancellable)) {
 		return false;
 	}
+	const char *javaExec = instance->javaLocation;
+	if(!javaExec) {
+		json_object *javaVer = json_object_object_get(json, "javaVersion");
+		int lastVer = 0, minVer = json_get_int(javaVer, "minVersion");
+		int recommendedVer = json_get_int(javaVer, "majorVersion");
+		GSList *runtime = settings.javaRuntimes;
+		while(runtime) {
+			JavaRuntime *jre = runtime->data;
+			int jreMajor = java_get_major_version(jre);
+			if(jreMajor >= minVer && jreMajor <= recommendedVer && lastVer <= jreMajor) {
+				lastVer = jreMajor;
+				javaExec = jre->location;
+			}
+			runtime = runtime->next;
+		}
+	}
+	if(!javaExec) {
+		run_callback(show_error, "Failed to determine used Java runtime");
+		return false;
+	}
 	const char *id = json_get_string(json, "id");
 	const char *minecraftArguments = json_get_string(json, "minecraftArguments");
 	char *cp = microlauncher_get_javacp(json, versions_dir, libraries_dir);
@@ -1091,17 +1171,32 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 
 	c = 0;
 	char *argv[256];
-/* TODO determine java automatically from javaVersion key */
 #ifdef G_OS_UNIX
 	argv[c++] = "env";
+	GtkSettings *gtksettings = gtk_settings_get_default();
+	if(gtksettings) {
+		GValue value = G_VALUE_INIT;
+		g_object_get_property(G_OBJECT(gtksettings), "gtk-cursor-theme-size", &value);
+		if(g_value_get_int(&value) > 0) {
+			// GLFW uses this env to determine client cursor size (smh when will it use server-side cursor already?)
+			argv[c++] = malloc_strs[m++] = g_strdup_printf("XCURSOR_SIZE=%d", g_value_get_int(&value));
+		}
+	}
 	if(settings.gpu_id) {
 		argv[c++] = malloc_strs[m++] = g_strdup_printf("DRI_PRIME=%s", settings.gpu_id);
+	}
+	if(settings.use_zink) {
+		// Force nvidia drivers to use Mesa
+		argv[c++] = "__GLX_VENDOR_LIBRARY_NAME=mesa";
+		argv[c++] = "__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/50_mesa.json";
+
+		argv[c++] = "MESA_LOADER_DRIVER_OVERRIDE=zink";
 	}
 	if(access("/lib/libgcompat.so.0", R_OK) == 0) {
 		argv[c++] = malloc_strs[m++] = g_strdup_printf("LD_PRELOAD=%s", "/lib/libgcompat.so.0");
 	}
 #endif
-	argv[c++] = instance->javaLocation ? instance->javaLocation : "java";
+	argv[c++] = (char *)javaExec;
 
 	// JVM args
 	if(json_object_is_type(argumentsJvm, json_type_array)) {

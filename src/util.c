@@ -185,7 +185,7 @@ void string_destroy(String *str) {
 FILE *fopen_mkdir(const char *path, const char *mode) {
 	gchar *dirname = g_path_get_dirname(path);
 	FILE *fd = NULL;
-	if(g_mkdir_with_parents(dirname, 0755) == 0) {
+	if(g_mkdir_with_parents(dirname, 0775) == 0) {
 		fd = fopen(path, mode);
 	}
 	g_free(dirname);

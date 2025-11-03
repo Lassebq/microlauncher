@@ -7,6 +7,7 @@
 #include <gtk/gtk.h>
 #include <json_object.h>
 #include <json_types.h>
+#include <linux/limits.h>
 #include <microlauncher.h>
 #include <microlauncher_account.h>
 #include <microlauncher_instance.h>
@@ -50,6 +51,7 @@ static GtkStack *launcherStack;
 static GtkCheckButton *checkFullscreen;
 static GtkCheckButton *checkDemo;
 static GtkCheckButton *checkUpdate;
+static GtkCheckButton *checkUseZink;
 static GtkEntry *widthEntry;
 static GtkEntry *heightEntry;
 static GtkRevealer *revealer;
@@ -155,6 +157,7 @@ static void select_instance_directory(GtkFileDialog *dialog, GAsyncResult *res, 
 static void select_instance_dir_event(GtkButton *button, struct UserDialog *data) {
 	GtkEntry *entry = data->data;
 	GtkFileDialog *dialog = gtk_file_dialog_new();
+	gtk_file_dialog_set_title(dialog, "Select instance directory");
 	GFile *file = g_file_new_for_path(gtk_entry_get_text(entry));
 	if(file && g_file_query_file_type(file, G_FILE_QUERY_INFO_NONE, NULL) == G_FILE_TYPE_DIRECTORY) {
 		gtk_file_dialog_set_initial_folder(dialog, file);
@@ -166,7 +169,7 @@ static void select_instance_dir_event(GtkButton *button, struct UserDialog *data
 static void select_instance_java(GtkFileDialog *dialog, GAsyncResult *res, GListStore *store) {
 	GFile *file = gtk_file_dialog_open_finish(dialog, res, NULL);
 	if(file) {
-		JavaRuntime *runtime = microlauncher_java_runtime_new(NULL, g_file_peek_path(file));
+		JavaRuntime *runtime = microlauncher_java_runtime_new(g_file_peek_path(file));
 		settings->javaRuntimes = g_slist_append(settings->javaRuntimes, runtime);
 		g_list_store_append(store, runtime);
 		g_object_unref(file);
@@ -190,6 +193,7 @@ static void set_active_java(GtkButton *button, struct SetActiveJava *activeRunti
 static void select_instance_java_file(GtkButton *button, struct UserDialog *data) {
 	GListStore *store = data->data;
 	GtkFileDialog *dialog = gtk_file_dialog_new();
+	gtk_file_dialog_set_title(dialog, "Select java executable");
 	gtk_file_dialog_open(dialog, data->parent, NULL, (GAsyncReadyCallback)select_instance_java, store);
 }
 
@@ -220,14 +224,21 @@ static void select_instance_java_event(GtkButton *button, struct UserDialog *dat
 	scrolledWindow = GTK_SCROLLED_WINDOW(widget);
 
 	GListStore *store = g_list_store_new(G_TYPE_OBJECT);
-	GSList *node = settings->javaRuntimes;
+	GSList *node = settings->javaRuntimes, *prevNode;
 	JavaRuntime *selectedRuntime = NULL;
 	while(node) {
 		JavaRuntime *runtime = node->data;
-		if(strequal(runtime->location, gtk_entry_get_text(data->data))) {
-			selectedRuntime = runtime;
+		if(runtime && runtime->location && g_file_query_file_type(g_file_new_for_path(runtime->location), 0, NULL) == G_FILE_TYPE_REGULAR) {
+			if(strequal(runtime->location, gtk_entry_get_text(data->data))) {
+				selectedRuntime = runtime;
+			}
+			g_list_store_append(store, node->data);
+		} else if(runtime) { // Remove if it doesn't exist anymore at specified location
+			prevNode = node;
+			node = node->next;
+			settings->javaRuntimes = g_slist_remove_link(settings->javaRuntimes, prevNode);
+			continue;
 		}
-		g_list_store_append(store, node->data);
 		node = node->next;
 	}
 	widget = gtk_column_view_new(NULL);
@@ -349,7 +360,14 @@ static void create_or_modify_instance(GtkButton *button, void *userdata) {
 	g_value_set_string(&strVal, gtk_entry_get_text(createInstance->instanceName));
 	g_object_set_property(G_OBJECT(inst), "name", &strVal);
 
-	g_value_set_string(&strVal, gtk_entry_get_text(createInstance->instanceDir));
+	strConst = gtk_entry_get_text(createInstance->instanceDir);
+	if(strlen(strConst) == 0) {
+		strConst = gtk_entry_get_placeholder_text(createInstance->instanceDir);
+	}
+	if(g_file_query_file_type(g_file_new_for_path(strConst), G_FILE_QUERY_INFO_NONE, NULL) != G_FILE_TYPE_DIRECTORY) {
+		g_mkdir_with_parents(strConst, 0775);
+	}
+	g_value_set_string(&strVal, strConst);
 	g_object_set_property(G_OBJECT(inst), "location", &strVal);
 
 	strConst = gtk_entry_get_text(createInstance->instanceJvm);
@@ -411,6 +429,7 @@ static gboolean try_scroll_to(struct TryScroll *tryScroll) {
 struct ModifyInstanceName {
 	char *instanceName;
 	GtkWidget *createButton;
+	GtkEntry *instanceLocationEntry;
 };
 
 static const MicrolauncherInstance *get_instance_by_name(const char *name) {
@@ -428,19 +447,29 @@ static const MicrolauncherInstance *get_instance_by_name(const char *name) {
 static void instance_name_changed(GtkEntry *self, gpointer user_data) {
 	struct ModifyInstanceName instName = *(struct ModifyInstanceName *)user_data;
 	const char *text = gtk_entry_get_text(self);
+	gboolean error = false;
+	const char *tooltip = "";
+	const char *placeholder = "";
+	char *tempStr = NULL;
 	if(strlen(text) == 0) {
-		gtk_widget_add_css_class(GTK_WIDGET(self), "error");
-		gtk_widget_set_tooltip_text(GTK_WIDGET(self), "Name cannot be empty");
-		gtk_widget_set_sensitive(instName.createButton, false);
+		tooltip = "Name cannot be empty";
+		error = true;
 	} else if(get_instance_by_name(text) && !strequal(instName.instanceName, text)) {
-		gtk_widget_add_css_class(GTK_WIDGET(self), "error");
-		gtk_widget_set_tooltip_text(GTK_WIDGET(self), "Instance name conflicts with existing instance");
-		gtk_widget_set_sensitive(instName.createButton, false);
+		tooltip = "Instance name conflicts with existing instance";
+		placeholder = tempStr = g_strdup_printf("%s/instances/%s", settings->launcher_root, text);
+		error = true;
 	} else {
-		gtk_widget_remove_css_class(GTK_WIDGET(self), "error");
-		gtk_widget_set_tooltip_text(GTK_WIDGET(self), "");
-		gtk_widget_set_sensitive(instName.createButton, true);
+		placeholder = tempStr = g_strdup_printf("%s/instances/%s", settings->launcher_root, text);
 	}
+	if(error) {
+		gtk_widget_remove_css_class(GTK_WIDGET(self), "error");
+	} else {
+		gtk_widget_add_css_class(GTK_WIDGET(self), "error");
+	}
+	gtk_widget_set_tooltip_text(GTK_WIDGET(self), tooltip);
+	gtk_entry_set_placeholder_text(instName.instanceLocationEntry, placeholder);
+	free(tempStr);
+	gtk_widget_set_sensitive(instName.createButton, !error);
 }
 
 static void set_entry_filter(GtkEditable *editable, gpointer user_data) {
@@ -508,6 +537,12 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 
 	widget = gtk_entry_new();
 	entry = GTK_ENTRY(widget);
+	instName->instanceLocationEntry = entry;
+	if(instName->instanceName) {
+		char *placeholder = g_strdup_printf("%s/instances/%s", settings->launcher_root, instName->instanceName);
+		gtk_entry_set_placeholder_text(entry, placeholder);
+		free(placeholder);
+	}
 	if(instance) {
 		gtk_entry_set_text(entry, instance->location);
 	}
@@ -530,6 +565,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 
 	widget = gtk_entry_new();
 	entry = GTK_ENTRY(widget);
+	gtk_entry_set_placeholder_text(entry, "Auto-select from available");
 	if(instance) {
 		gtk_entry_set_text(entry, instance->javaLocation);
 	}
@@ -693,8 +729,9 @@ static void microlauncher_gui_refresh_instance(void) {
 	GtkGrid *titleArea, *grid;
 	int grid_row;
 	char *label;
+	MicrolauncherInstance *inst = settings->instance;
 
-	if(settings->instance) {
+	if(inst) {
 		grid = GTK_GRID(gtk_grid_new());
 		grid_row = 0;
 		gtk_widget_set_margin(GTK_WIDGET(grid), 0, 10, 10, 10);
@@ -710,24 +747,28 @@ static void microlauncher_gui_refresh_instance(void) {
 		gtk_grid_attach(grid, GTK_WIDGET(titleArea), 0, grid_row++, 1, 1);
 
 		struct stat st;
-		if(access(settings->instance->icon, F_OK) == 0 && stat(settings->instance->icon, &st) == 0 && S_ISREG(st.st_mode)) {
+		if(access(inst->icon, F_OK) == 0 && stat(inst->icon, &st) == 0 && S_ISREG(st.st_mode)) {
 			GtkWidget *icon;
 			icon = gtk_image_new();
 			gtk_image_set_pixel_size(GTK_IMAGE(icon), 64);
 			gtk_widget_set_margin_end(icon, 20);
-			gtk_image_set_from_file(GTK_IMAGE(icon), settings->instance->icon);
+			gtk_image_set_from_file(GTK_IMAGE(icon), inst->icon);
 			gtk_grid_attach(titleArea, GTK_WIDGET(icon), 0, 0, 1, 2);
 		}
 
-		widget = gtk_label_new(settings->instance->name);
+		widget = gtk_label_new(inst->name);
 		gtk_label_set_ellipsize(GTK_LABEL(widget), PANGO_ELLIPSIZE_END);
 		gtk_widget_add_css_class(widget, "title-1");
 		gtk_label_set_xalign(GTK_LABEL(widget), 0.0F);
 		gtk_widget_set_hexpand(widget, true);
 		gtk_grid_attach(titleArea, widget, 1, 0, 1, 1);
 
-		label = g_strdup_printf("Version %s", settings->instance->version);
+		const char *version = inst->version;
+		char path[PATH_MAX];
+		snprintf(path, PATH_MAX, "%s/versions/%s/%s.json", settings->launcher_root, version, version);
+		label = g_strdup_printf("Version <a href=\"file://%s\">%s</a>", path, version);
 		widget = gtk_label_new(label);
+		gtk_label_set_use_markup(GTK_LABEL(widget), true);
 		gtk_label_set_ellipsize(GTK_LABEL(widget), PANGO_ELLIPSIZE_END);
 		free(label);
 		gtk_label_set_xalign(GTK_LABEL(widget), 0.0F);
@@ -738,13 +779,13 @@ static void microlauncher_gui_refresh_instance(void) {
 		widget = gtk_entry_new();
 		gtk_editable_set_editable(GTK_EDITABLE(widget), false);
 		gtk_widget_set_hexpand(widget, true);
-		if(settings->instance->location) {
-			gtk_entry_set_text(GTK_ENTRY(widget), settings->instance->location);
+		if(inst->location) {
+			gtk_entry_set_text(GTK_ENTRY(widget), inst->location);
 		}
 		GtkBox *container = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10));
 		gtk_box_append(container, widget);
 		widget = gtk_button_new_with_label("Browse");
-		g_signal_connect(widget, "clicked", G_CALLBACK(browse_directory_click), settings->instance->location);
+		g_signal_connect(widget, "clicked", G_CALLBACK(browse_directory_click), inst->location);
 		gtk_box_append(container, widget);
 		widget = gtk_widget_with_label("Game directory:", GTK_WIDGET(container));
 		gtk_grid_attach(titleArea, widget, 0, 2, 3, 1);
@@ -763,12 +804,12 @@ static void microlauncher_gui_refresh_instance(void) {
 	gtk_widget_set_valign(widget, GTK_ALIGN_CENTER);
 	gtk_widget_set_halign(widget, GTK_ALIGN_END);
 	gtk_widget_set_hexpand(widget, true);
-	if(settings->instance) {
+	if(inst) {
 		gtk_grid_attach(titleArea, widget, 2, 0, 1, 1);
 		gtk_frame_set_label(instanceFrame, "Instance");
 
 		widget = gtk_button_new_with_label("Modify");
-		g_signal_connect(widget, "clicked", G_CALLBACK(microlauncher_modify_instance_window), settings->instance);
+		g_signal_connect(widget, "clicked", G_CALLBACK(microlauncher_modify_instance_window), inst);
 		gtk_widget_set_margin(widget, 0, 10, 10, 0);
 		gtk_widget_set_valign(widget, GTK_ALIGN_CENTER);
 		gtk_widget_set_halign(widget, GTK_ALIGN_END);
@@ -804,7 +845,7 @@ static void microlauncher_gui_refresh_instance(void) {
 	gtk_box_append(GTK_BOX(box), widget);
 	gtk_frame_set_child(userFrame, box);
 
-	gtk_widget_set_sensitive(GTK_WIDGET(playButton), settings->instance && settings->user);
+	gtk_widget_set_sensitive(GTK_WIDGET(playButton), inst && settings->user);
 }
 
 static gboolean microlauncher_gui_enable_cancel(void *userdata) {
@@ -852,6 +893,9 @@ static void clicked_play(void) {
 	settings->height = atoi(gtk_entry_buffer_get_text(gtk_entry_get_buffer(heightEntry)));
 	settings->fullscreen = gtk_check_button_get_active(checkFullscreen);
 	settings->allowUpdate = gtk_check_button_get_active(checkUpdate);
+#ifndef DISABLE_GPU
+	settings->use_zink = gtk_check_button_get_active(checkUseZink);
+#endif
 	settings->demo = gtk_check_button_get_active(checkDemo);
 	instanceCancellable = g_cancellable_new();
 	GTask *task = g_task_new(playButton, instanceCancellable, NULL, NULL);
@@ -937,6 +981,11 @@ static GtkWidget *microlauncher_gui_page_launcher(void) {
 		gtk_drop_down_set_selected(GTK_DROP_DOWN(widget), g_slist_index(gpuIds, node->data));
 	}
 	widget = gtk_widget_with_label("Preferred GPU:", widget);
+	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
+
+	widget = gtk_check_button_new_with_label("Use Zink");
+	checkUseZink = GTK_CHECK_BUTTON(widget);
+	gtk_widget_set_hexpand(widget, false);
 	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
 #endif
 
@@ -1055,7 +1104,7 @@ static void microlauncher_create_launcher(MicrolauncherInstance *inst) {
 	if(SHGetFolderPathA(NULL, CSIDL_STARTMENU, NULL, 0, dir) == S_OK) {
 		snprintf(path, PATH_MAX, "%s/Programs/MicroLauncher/%s.lnk", dir, inst->name);
 		char *dirname = g_path_get_dirname(path);
-		if(g_mkdir_with_parents(dirname, 0755) == 0) {
+		if(g_mkdir_with_parents(dirname, 0775) == 0) {
 
 			char *cmdline = g_strdup_printf("--instance \"%s\" --saved-user", inst->name);
 			g_print("%s\n", path);
@@ -1713,7 +1762,7 @@ static void microlauncher_gui_add_account(void) {
 
 	widget = gtk_stack_new();
 	GtkStack *stack = GTK_STACK(widget);
-	g_signal_connect(stack, "notify::visible-child", G_CALLBACK(on_stack_page_changed), NULL);
+	g_signal_connect(stack, "notify::visible-child-name", G_CALLBACK(on_stack_page_changed), NULL);
 	g_signal_connect(newWindow, "destroy", G_CALLBACK(close_accounts_dialog), NULL);
 	gtk_stack_switcher_set_stack(stackSwitcher, stack);
 	gtk_box_append(box, widget);
@@ -1964,7 +2013,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	widget = gtk_stack_new();
 	GtkStack *stack = GTK_STACK(widget);
 	launcherStack = stack;
-	g_signal_connect(stack, "notify::visible-child", G_CALLBACK(on_launcher_stack_page_changed), NULL);
+	g_signal_connect(stack, "notify::visible-child-name", G_CALLBACK(on_launcher_stack_page_changed), NULL);
 	gtk_stack_switcher_set_stack(stackSwitcher, stack);
 	gtk_stack_set_transition_type(stack, GTK_STACK_TRANSITION_TYPE_SLIDE_LEFT_RIGHT);
 	gtk_stack_add_titled(stack, microlauncher_gui_page_launcher(), "launcher", "Launcher");
@@ -2026,6 +2075,9 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	gtk_check_button_set_active(checkFullscreen, settings->fullscreen);
 	gtk_check_button_set_active(checkDemo, settings->demo);
 	gtk_check_button_set_active(checkUpdate, settings->allowUpdate);
+#ifndef DISABLE_GPU
+	gtk_check_button_set_active(checkUseZink, settings->use_zink);
+#endif
 
 	microlauncher_set_callbacks(callbacks);
 	g_signal_connect(window, "close-request", G_CALLBACK(close_request), NULL);

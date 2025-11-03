@@ -14,6 +14,8 @@ struct _JavaRuntime {
 
 G_DECLARE_FINAL_TYPE(JavaRuntime, microlauncher_java_runtime, MICROLAUNCHER, JAVA_RUNTIME, GObject);
 
-JavaRuntime *microlauncher_java_runtime_new(const char *version, const char *location);
+JavaRuntime *microlauncher_java_runtime_new(const char *location);
+
+int java_get_major_version(JavaRuntime *runtime);
 
 G_END_DECLS

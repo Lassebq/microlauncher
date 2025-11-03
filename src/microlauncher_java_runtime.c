@@ -2,6 +2,7 @@
 #include <glib-object.h>
 #include <glib.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <util/gobject_util.h>
 #include <util/util.h>
@@ -130,9 +131,18 @@ static void microlauncher_java_runtime_class_init(JavaRuntimeClass *klass) {
 	g_object_class_install_properties(object_class, G_N_ELEMENTS(properties), properties);
 }
 
-JavaRuntime *microlauncher_java_runtime_new(const char *version, const char *location) {
+JavaRuntime *microlauncher_java_runtime_new(const char *location) {
 	JavaRuntime *self = g_object_new(microlauncher_java_runtime_get_type(), NULL);
-	self->version = g_strdup(version);
 	self->location = g_strdup(location);
 	return self;
+}
+
+int java_get_major_version(JavaRuntime *runtime) {
+	GValue value = G_VALUE_INIT;
+	g_object_get_property(G_OBJECT(runtime), "version", &value);
+	const char *str = g_value_get_string(&value);
+	if(strncmp(str, "1.", 2) == 0) {
+		str = str + 2;
+	}
+	return atoi(str);
 }

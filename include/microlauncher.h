@@ -31,6 +31,7 @@ struct Settings {
 	bool fullscreen;
 	bool demo;
 	bool allowUpdate;
+	bool use_zink;
 	char *launcher_root;
 	char *manifest_url;
 	char *gpu_id;
