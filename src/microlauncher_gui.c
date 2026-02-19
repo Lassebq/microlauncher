@@ -456,15 +456,15 @@ static void instance_name_changed(GtkEntry *self, gpointer user_data) {
 		error = true;
 	} else if(get_instance_by_name(text) && !strequal(instName.instanceName, text)) {
 		tooltip = "Instance name conflicts with existing instance";
-		placeholder = tempStr = g_strdup_printf("%s/instances/%s", settings->launcher_root, text);
+		placeholder = tempStr = g_strdup_printf("%s/microlauncher/instances/%s", XDG_DATA_HOME, text);
 		error = true;
 	} else {
-		placeholder = tempStr = g_strdup_printf("%s/instances/%s", settings->launcher_root, text);
+		placeholder = tempStr = g_strdup_printf("%s/microlauncher/instances/%s", XDG_DATA_HOME, text);
 	}
 	if(error) {
-		gtk_widget_remove_css_class(GTK_WIDGET(self), "error");
-	} else {
 		gtk_widget_add_css_class(GTK_WIDGET(self), "error");
+	} else {
+		gtk_widget_remove_css_class(GTK_WIDGET(self), "error");
 	}
 	gtk_widget_set_tooltip_text(GTK_WIDGET(self), tooltip);
 	gtk_entry_set_placeholder_text(instName.instanceLocationEntry, placeholder);
@@ -539,7 +539,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	entry = GTK_ENTRY(widget);
 	instName->instanceLocationEntry = entry;
 	if(instName->instanceName) {
-		char *placeholder = g_strdup_printf("%s/instances/%s", settings->launcher_root, instName->instanceName);
+		char *placeholder = g_strdup_printf("%s/microlauncher/instances/%s", XDG_DATA_HOME, instName->instanceName);
 		gtk_entry_set_placeholder_text(entry, placeholder);
 		free(placeholder);
 	}
@@ -875,6 +875,17 @@ static void launch_instance_thread(GTask *gtask, gpointer source_object, gpointe
 	g_application_release(G_APPLICATION(app));
 }
 
+static void apply_settings(void) {
+	settings->width = atoi(gtk_entry_buffer_get_text(gtk_entry_get_buffer(widthEntry)));
+	settings->height = atoi(gtk_entry_buffer_get_text(gtk_entry_get_buffer(heightEntry)));
+	settings->fullscreen = gtk_check_button_get_active(checkFullscreen);
+	settings->allowUpdate = gtk_check_button_get_active(checkUpdate);
+#ifndef DISABLE_GPU
+	settings->use_zink = gtk_check_button_get_active(checkUseZink);
+#endif
+	settings->demo = gtk_check_button_get_active(checkDemo);
+}
+
 static void clicked_play(void) {
 	if(instancePid != 0) {
 		util_kill_process(instancePid);
@@ -889,14 +900,7 @@ static void clicked_play(void) {
 	gtk_widget_set_sensitive(GTK_WIDGET(playButton), false);
 	gtk_widget_set_sensitive(GTK_WIDGET(instancesPage), false);
 	gtk_widget_set_sensitive(GTK_WIDGET(accountsPage), false);
-	settings->width = atoi(gtk_entry_buffer_get_text(gtk_entry_get_buffer(widthEntry)));
-	settings->height = atoi(gtk_entry_buffer_get_text(gtk_entry_get_buffer(heightEntry)));
-	settings->fullscreen = gtk_check_button_get_active(checkFullscreen);
-	settings->allowUpdate = gtk_check_button_get_active(checkUpdate);
-#ifndef DISABLE_GPU
-	settings->use_zink = gtk_check_button_get_active(checkUseZink);
-#endif
-	settings->demo = gtk_check_button_get_active(checkDemo);
+	apply_settings();
 	instanceCancellable = g_cancellable_new();
 	GTask *task = g_task_new(playButton, instanceCancellable, NULL, NULL);
 	g_task_run_in_thread(task, launch_instance_thread);
@@ -1833,6 +1837,7 @@ static void microlauncher_gui_close_launcher(void *data) {
 }
 
 static gboolean close_request(GtkWindow *self, gpointer user_data) {
+	apply_settings();
 	microlauncher_gui_close_launcher(NULL);
 	return true;
 }

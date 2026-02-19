@@ -600,10 +600,18 @@ json_object *inherit_json(const char *versions_path, const char *id, bool allowU
 		if(json_get_string(thisObj, "minecraftArguments")) {
 			json_object_object_del(obj, "arguments");
 		}
-		json_object *args = json_object_object_get(obj, "arguments");
-		if(args) {
-			merge_json_object(args, json_object_object_get(thisObj, "arguments"), true);
+		json_object *member = json_object_object_get(obj, "arguments");
+		if(member) {
+			merge_json_object(member, json_object_object_get(thisObj, "arguments"), true);
 			json_object_object_del(thisObj, "arguments");
+		}
+		// Remember the original id of client download to avoid downloading duplicate in inherited JSONs
+		member = json_object_object_get(obj, "downloads");
+		if(member) {
+			member = json_object_object_get(member, "client");
+			if(member && json_get_string(member, "id") != NULL) {
+				json_set_string(member, "id", json_get_string(obj, "id"));
+			}
 		}
 		merge_json_object(obj, thisObj, true);
 
@@ -739,7 +747,11 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 	}
 	// Perform download
 	run_callback(stage_update, "Downloading libraries");
-	snprintf(path, PATH_MAX, "%s/%s/%s.jar", versions_path, str, str);
+	const char *clientJarId = json_get_string(client, "id");
+	if(!clientJarId) {
+		clientJarId = str;
+	}
+	snprintf(path, PATH_MAX, "%s/%s/%s.jar", versions_path, clientJarId, clientJarId);
 
 	str = json_get_string(client, "url");
 	if(!microlauncher_fetch_artifact(
@@ -810,7 +822,18 @@ char *microlauncher_get_javacp(json_object *json, const char *versions_path, con
 	if(!id) {
 		return NULL;
 	}
-	snprintf(path, PATH_MAX, "%s/%s/%s.jar", versions_path, id, id);
+	const char *clientJarId = id;
+	downloads = json_object_object_get(json, "downloads");
+	if(downloads) {
+		json_object *client = json_object_object_get(downloads, "client");
+		if(client) {
+			clientJarId = json_get_string(client, "id");
+			if(!clientJarId) {
+				clientJarId = id;
+			}
+		}
+	}
+	snprintf(path, PATH_MAX, "%s/%s/%s.jar", versions_path, clientJarId, clientJarId);
 	String str = string_new(path);
 	libraries = json_object_object_get(json, "libraries");
 
@@ -906,6 +929,7 @@ void microlauncher_load_settings(void) {
 	settings.demo = json_get_bool(obj, "demo");
 	settings.width = json_get_int(obj, "width");
 	settings.height = json_get_int(obj, "height");
+	settings.use_zink = json_get_bool(obj, "zink");
 	settings.gpu_id = g_strdup(getenv("DRI_PRIME"));
 	load_list(json_object_object_get(obj, "javaRuntimes"), &settings.javaRuntimes, load_runtime);
 
@@ -954,6 +978,7 @@ void microlauncher_save_settings(void) {
 	json_set_bool(obj, "fullscreen", settings.fullscreen);
 	json_set_bool(obj, "update", settings.allowUpdate);
 	json_set_bool(obj, "demo", settings.demo);
+	json_set_bool(obj, "zink", settings.use_zink);
 	if(settings.launcher_root) {
 		json_set_string(obj, "launcherRoot", settings.launcher_root);
 	}
@@ -1174,14 +1199,16 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 #ifdef G_OS_UNIX
 	argv[c++] = "env";
 	GtkSettings *gtksettings = gtk_settings_get_default();
+	int xcursize = 24;
 	if(gtksettings) {
 		GValue value = G_VALUE_INIT;
 		g_object_get_property(G_OBJECT(gtksettings), "gtk-cursor-theme-size", &value);
 		if(g_value_get_int(&value) > 0) {
+			xcursize = g_value_get_int(&value);
 			// GLFW uses this env to determine client cursor size (smh when will it use server-side cursor already?)
-			argv[c++] = malloc_strs[m++] = g_strdup_printf("XCURSOR_SIZE=%d", g_value_get_int(&value));
 		}
 	}
+	argv[c++] = malloc_strs[m++] = g_strdup_printf("XCURSOR_SIZE=%d", xcursize);
 	if(settings.gpu_id) {
 		argv[c++] = malloc_strs[m++] = g_strdup_printf("DRI_PRIME=%s", settings.gpu_id);
 	}
