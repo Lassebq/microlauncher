@@ -1,3 +1,4 @@
+#include "gdk-pixbuf/gdk-pixbuf.h"
 #include "microlauncher_java_runtime.h"
 #include <ctype.h>
 #include <curl/curl.h>
@@ -7,7 +8,6 @@
 #include <gtk/gtk.h>
 #include <json_object.h>
 #include <json_types.h>
-#include <linux/limits.h>
 #include <microlauncher.h>
 #include <microlauncher_account.h>
 #include <microlauncher_instance.h>
@@ -103,6 +103,17 @@ static void remove_instance(MicrolauncherInstance *instance) {
 	}
 	g_object_unref(instance);
 	microlauncher_gui_refresh_instance();
+}
+
+static void remove_instance_confirm(GtkDialog *self, gint response_id, gpointer user_data) {
+	gtk_window_destroy(GTK_WINDOW(self));
+	if(response_id == GTK_RESPONSE_YES) {
+		remove_instance(user_data);
+	}
+}
+
+static void remove_instance_button_cb(GtkButton *button, MicrolauncherInstance *instance) {
+	gtk_show_modal_dialog("Are you sure you want to delete this instance?\nThis action cannot be undone", DIALOG_YN, GTK_MESSAGE_QUESTION, window, G_CALLBACK(remove_instance_confirm), instance);
 }
 
 static void add_instance(MicrolauncherInstance *instance, guint index) {
@@ -312,7 +323,7 @@ static void select_instance_icon(GtkFileDialog *dialog, GAsyncResult *res, gpoin
 	GtkImage *image = GTK_IMAGE(data);
 	GFile *file = gtk_file_dialog_open_finish(dialog, res, NULL);
 	if(file) {
-		gtk_image_set_from_file(image, g_file_peek_path(file));
+		gtk_image_set_from_file_pixbuf(image, g_file_peek_path(file));
 		g_object_set_data_full(G_OBJECT(image), "icon-location", g_file_get_path(file), g_free);
 		g_object_unref(file);
 	}
@@ -507,7 +518,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	createInstance->instanceIcon = GTK_IMAGE(widget);
 	gtk_image_set_pixel_size(GTK_IMAGE(widget), 64);
 	if(instance && instance->icon) {
-		gtk_image_set_from_file(GTK_IMAGE(widget), instance->icon);
+		gtk_image_set_from_file_pixbuf(GTK_IMAGE(widget), instance->icon);
 		g_object_set_data_full(G_OBJECT(widget), "icon-location", g_strdup(instance->icon), g_free);
 	} else {
 		gtk_image_set_from_icon_name(GTK_IMAGE(widget), "insert-image");
@@ -747,14 +758,16 @@ static void microlauncher_gui_refresh_instance(void) {
 		gtk_grid_attach(grid, GTK_WIDGET(titleArea), 0, grid_row++, 1, 1);
 
 		struct stat st;
+		GtkWidget *icon;
+		icon = gtk_image_new();
+		gtk_image_set_pixel_size(GTK_IMAGE(icon), 64);
+		gtk_widget_set_margin_end(icon, 20);
 		if(access(inst->icon, F_OK) == 0 && stat(inst->icon, &st) == 0 && S_ISREG(st.st_mode)) {
-			GtkWidget *icon;
-			icon = gtk_image_new();
-			gtk_image_set_pixel_size(GTK_IMAGE(icon), 64);
-			gtk_widget_set_margin_end(icon, 20);
-			gtk_image_set_from_file(GTK_IMAGE(icon), inst->icon);
-			gtk_grid_attach(titleArea, GTK_WIDGET(icon), 0, 0, 1, 2);
+			gtk_image_set_from_file_pixbuf(GTK_IMAGE(icon), inst->icon);
+		} else {
+			gtk_image_set_from_resource(GTK_IMAGE(icon), "/io/github/microlauncher/resources/grass_block_icon.png");
 		}
+		gtk_grid_attach(titleArea, GTK_WIDGET(icon), 0, 0, 1, 2);
 
 		widget = gtk_label_new(inst->name);
 		gtk_label_set_ellipsize(GTK_LABEL(widget), PANGO_ELLIPSIZE_END);
@@ -1014,6 +1027,8 @@ struct InstanceRowWidgets {
 	GtkLabel *versionLabel;
 	GtkLabel *locationLabel;
 	GtkImage *icon;
+	GtkButton *buttonEdit;
+	GtkButton *buttonDelete;
 };
 
 static void popover_destroy(GtkWidget *self, GtkWidget *destroy) {
@@ -1080,6 +1095,17 @@ static void instance_list_view_setup_factory(GtkListItemFactory *factory, GtkLis
 	gtk_widget_add_css_class(widget, "subtitle");
 	gtk_grid_attach(grid, widget, 1, 1, 1, 1);
 
+	widget = gtk_button_new_from_icon_name("emblem-system-symbolic");
+	rw->buttonEdit = GTK_BUTTON(widget);
+	gtk_widget_set_margin(widget, 10, 10, 5, 5);
+	gtk_grid_attach(grid, widget, 3, 0, 1, 2);
+
+	widget = gtk_button_new_from_icon_name("user-trash-full-symbolic");
+	gtk_widget_add_css_class(widget, "destructive-action");
+	rw->buttonDelete = GTK_BUTTON(widget);
+	gtk_widget_set_margin(widget, 10, 10, 5, 0);
+	gtk_grid_attach(grid, widget, 4, 0, 1, 2);
+
 	gtk_list_item_set_child(list_item, GTK_WIDGET(grid));
 	g_object_set_data_full(G_OBJECT(list_item), "row-widgets", rw, g_free);
 }
@@ -1143,7 +1169,7 @@ static void instance_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant
 	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "create-launcher") == 0) {
 		microlauncher_create_launcher(inst);
 	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "delete") == 0) {
-		remove_instance(inst);
+		remove_instance_button_cb(NULL, inst);
 	}
 }
 
@@ -1220,8 +1246,10 @@ static void update_icon(GObject *self, GParamSpec *pspec, gpointer user_data) {
 	GValue value = G_VALUE_INIT;
 	g_value_init(&value, pspec->value_type);
 	g_object_get_property(self, pspec->name, &value);
-	if(G_VALUE_HOLDS(&value, G_TYPE_STRING)) {
-		gtk_image_set_from_file(GTK_IMAGE(user_data), g_value_get_string(&value));
+	if(G_VALUE_HOLDS(&value, G_TYPE_STRING) && g_value_get_string(&value)) {
+		gtk_image_set_from_file_pixbuf(GTK_IMAGE(user_data), g_value_get_string(&value));
+	} else {
+		gtk_image_set_from_resource(GTK_IMAGE(user_data), "/io/github/microlauncher/resources/grass_block_icon.png");
 	}
 }
 
@@ -1254,6 +1282,9 @@ static void instance_list_view_bind_factory(GtkListItemFactory *factory, GtkList
 	GSimpleActionGroup *actions = g_simple_action_group_new();
 	GSimpleAction *action;
 
+	g_signal_connect(rw->buttonEdit, "clicked", G_CALLBACK(microlauncher_modify_instance_window), instance);
+	g_signal_connect(rw->buttonDelete, "clicked", G_CALLBACK(remove_instance_button_cb), instance);
+
 	const char *action_names[] = {"play", "edit", "copy", "create-launcher", "delete", NULL};
 	int i = 0;
 	while(action_names[i]) {
@@ -1282,7 +1313,13 @@ static void instance_list_view_bind_factory(GtkListItemFactory *factory, GtkList
 	gtk_widget_add_controller(parent, GTK_EVENT_CONTROLLER(target));
 
 	g_signal_connect(instance, "notify::icon", G_CALLBACK(update_icon), rw->icon);
-	gtk_image_set_from_file(rw->icon, instance->icon);
+	gtk_image_set_from_file_pixbuf(rw->icon, instance->icon);
+	struct stat st;
+	if(access(instance->icon, F_OK) == 0 && stat(instance->icon, &st) == 0 && S_ISREG(st.st_mode)) {
+		gtk_image_set_from_file_pixbuf(rw->icon, instance->icon);
+	} else {
+		gtk_image_set_from_resource(rw->icon, "/io/github/microlauncher/resources/grass_block_icon.png");
+	}
 	g_object_bind_property(instance, "name", rw->instanceLabel, "label", G_BINDING_SYNC_CREATE);
 	gtk_label_set_label(rw->instanceLabel, instance->name);
 	g_object_bind_property(instance, "location", rw->locationLabel, "label", G_BINDING_SYNC_CREATE);
@@ -1370,6 +1407,7 @@ struct AccountRowWidgets {
 	GtkWidget *grid;
 	GtkLabel *nameLabel;
 	GtkLabel *typeLabel;
+	GtkImage *icon;
 };
 
 static void account_list_view_setup_factory(GtkListItemFactory *factory, GtkListItem *list_item, gpointer user_data) {
@@ -1380,19 +1418,25 @@ static void account_list_view_setup_factory(GtkListItemFactory *factory, GtkList
 	struct AccountRowWidgets *rw = g_new0(struct AccountRowWidgets, 1);
 	rw->grid = widget;
 
+	widget = gtk_image_new();
+	gtk_image_set_pixel_size(GTK_IMAGE(widget), 48);
+	gtk_widget_set_margin_end(widget, 10);
+	rw->icon = GTK_IMAGE(widget);
+	gtk_grid_attach(grid, widget, 0, 0, 1, 1);
+
 	widget = gtk_label_new(NULL);
 	rw->nameLabel = GTK_LABEL(widget);
 	gtk_widget_set_halign(widget, GTK_ALIGN_START);
 	gtk_widget_set_hexpand(widget, true);
 	gtk_widget_set_vexpand(widget, true);
 	gtk_widget_add_css_class(widget, "title");
-	gtk_grid_attach(grid, widget, 0, 0, 1, 1);
+	gtk_grid_attach(grid, widget, 1, 0, 1, 1);
 
 	widget = gtk_label_new(NULL);
 	rw->typeLabel = GTK_LABEL(widget);
 	gtk_widget_set_halign(widget, GTK_ALIGN_END);
 	gtk_widget_add_css_class(widget, "subtitle");
-	gtk_grid_attach(grid, widget, 1, 0, 1, 1);
+	gtk_grid_attach(grid, widget, 2, 0, 1, 1);
 
 	gtk_list_item_set_child(list_item, GTK_WIDGET(grid));
 	g_object_set_data_full(G_OBJECT(list_item), "row-widgets", rw, g_free);
@@ -1404,6 +1448,27 @@ static void account_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant 
 
 	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "delete") == 0) {
 		remove_account(account);
+	}
+}
+
+static void render_profile_face(GtkImage *image, MicrolauncherAccount *account) {
+	String png;
+	GdkPixbuf *pixbuf = NULL;
+	struct MinecraftProfile profile = microlauncher_msa_get_profile(account->uuid);
+	if(profile.texUrl) {
+		png = microlauncher_http_get_string(profile.texUrl, NULL, NULL);
+		pixbuf = gdk_pixbuf_new_from_stream(g_memory_input_stream_new_from_data(png.data, png.length, NULL), NULL, NULL);
+		string_destroy(&png);
+	}
+	if(!pixbuf) {
+		pixbuf = gdk_pixbuf_new_from_resource("/io/github/microlauncher/resources/char.png", NULL);
+	}
+	if(pixbuf) {
+		GdkPixbuf *face = gdk_pixbuf_new_subpixbuf(pixbuf, 8, 8, 8, 8);
+		GdkPixbuf *faceOverlay = gdk_pixbuf_new_subpixbuf(pixbuf, 40, 8, 8, 8);
+		gdk_pixbuf_composite(faceOverlay, face, 0, 0, 8, 8, 0, 0, 1.0, 1.0, GDK_INTERP_NEAREST, 255);
+		GdkPixbuf *scaled = gdk_pixbuf_scale_simple(face, 48, 48, GDK_INTERP_NEAREST);
+		gtk_image_set_from_pixbuf(image, scaled);
 	}
 }
 
@@ -1428,6 +1493,8 @@ static void account_list_view_bind_factory(GtkListItemFactory *factory, GtkListI
 	MicrolauncherAccount *account = gtk_list_item_get_item(list_item);
 	GSimpleActionGroup *actions = g_simple_action_group_new();
 	GSimpleAction *action;
+
+	render_profile_face(rw->icon, account);
 
 	// action = g_simple_action_new("edit", NULL);
 	// g_signal_connect(action, "activate", G_CALLBACK(account_action), account);

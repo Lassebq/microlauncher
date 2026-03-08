@@ -180,6 +180,7 @@ void string_append(String *str, const char *append) {
 
 void string_destroy(String *str) {
 	free(str->data);
+	str->data = NULL;
 }
 
 FILE *fopen_mkdir(const char *path, const char *mode) {

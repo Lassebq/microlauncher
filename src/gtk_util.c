@@ -1,3 +1,5 @@
+#include "util/gtk_util.h"
+#include "gdk-pixbuf/gdk-pixbuf.h"
 #include <gio/gio.h>
 #include <glib-object.h>
 #include <glib.h>
@@ -147,4 +149,65 @@ GtkWidget *gtk_drop_down_simple_new(GtkStringList *list, GtkExpression *expressi
 	g_signal_connect(factory, "bind", G_CALLBACK(simple_drop_down_bind), dropDown);
 	gtk_drop_down_set_factory(dropDown, factory);
 	return GTK_WIDGET(dropDown);
+}
+
+void gtk_image_set_from_file_pixbuf(GtkImage *image, const char *path) {
+	GError *error = NULL;
+	GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file(path, &error);
+	gtk_image_set_from_pixbuf(image, pixbuf);
+	g_object_unref(pixbuf);
+}
+
+void gtk_show_modal_dialog(const char *message, enum EDialogType dialogType, GtkMessageType type, GtkWindow *parent, GCallback callback, gpointer user_data) {
+	GtkMessageDialog *msgdialog = GTK_MESSAGE_DIALOG(g_object_new(GTK_TYPE_MESSAGE_DIALOG,
+																  "use-header-bar", FALSE,
+																  "message-type", type,
+																  NULL));
+	GtkDialog *dialog = GTK_DIALOG(msgdialog);
+
+	gtk_application_add_window(gtk_window_get_application(parent), GTK_WINDOW(dialog));
+	if(parent != NULL)
+		gtk_window_set_transient_for(GTK_WINDOW(dialog), parent);
+
+	switch(dialogType) {
+		case DIALOG_NONE:
+			/* nothing */
+			break;
+
+		case DIALOG_OK:
+			gtk_dialog_add_button(dialog, "OK", GTK_RESPONSE_OK);
+			break;
+
+		case DIALOG_OK_CANCEL:
+			gtk_dialog_add_button(dialog, "OK", GTK_RESPONSE_OK);
+			gtk_dialog_add_button(dialog, "Cancel", GTK_RESPONSE_CANCEL);
+			break;
+
+		case DIALOG_YN:
+			gtk_dialog_add_button(dialog, "Yes", GTK_RESPONSE_YES);
+			gtk_dialog_add_button(dialog, "No", GTK_RESPONSE_NO);
+			break;
+
+		case DIALOG_YN_CANCEL:
+			gtk_dialog_add_button(dialog, "Yes", GTK_RESPONSE_YES);
+			gtk_dialog_add_button(dialog, "No", GTK_RESPONSE_NO);
+			gtk_dialog_add_button(dialog, "Cancel", GTK_RESPONSE_CANCEL);
+			break;
+
+		default:
+			g_warning("Unknown EDialogType");
+			break;
+	}
+
+	g_object_notify(G_OBJECT(dialog), "buttons");
+
+	gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+
+	gtk_message_dialog_set_markup(GTK_MESSAGE_DIALOG(dialog), message);
+	if(callback) {
+		g_signal_connect(dialog, "response", callback, user_data);
+	} else {
+		g_signal_connect(dialog, "response", G_CALLBACK(gtk_window_destroy), dialog);
+	}
+	gtk_window_present(GTK_WINDOW(dialog));
 }

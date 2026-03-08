@@ -48,6 +48,8 @@ endif()
 
 find_program(MAGICK NAMES "magick" "convert" "magick.exe" "convert.exe")
 find_program(ICOTOOL NAMES "icotool" "icotool.exe")
+find_program(GLIB_COMPILE_RESOURCES "glib-compile-resources")
+
 if(APPLE)
     if(NOT MAGICK) # Fall back to Apple's scriptable image processing system
         find_program(SIPS sips)
@@ -142,7 +144,16 @@ if(APPLE)
     )
 endif()
 
-add_executable(microlauncher WIN32 MACOSX_BUNDLE ${SOURCES})
+add_executable(microlauncher WIN32 MACOSX_BUNDLE ${SOURCES} resources.c)
+add_custom_command(
+        OUTPUT resources.c
+        COMMAND ${GLIB_COMPILE_RESOURCES} ${PROJECT_SOURCE_DIR}/assets/resources.gresource.xml --target=resources.c --generate-source --sourcedir=${PROJECT_SOURCE_DIR}/assets
+        DEPENDS assets/resources.gresource.xml
+        assets/char.png
+)
+
+add_custom_target(generate_resources DEPENDS resources.c)
+add_dependencies(microlauncher generate_resources)
 if(NOT LIBPCI_FOUND)
     target_compile_definitions(microlauncher PRIVATE DISABLE_GPU=1)
 else()

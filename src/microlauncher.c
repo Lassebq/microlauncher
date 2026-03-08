@@ -360,15 +360,16 @@ size_t write_callback_string(void *ptr, size_t size, size_t nmemb, void *userdat
 	return size * nmemb;
 }
 
-json_object *microlauncher_http_get_json(const char *url, struct curl_slist *headers, const char *post) {
+String microlauncher_http_get_string(const char *url, struct curl_slist *headers, const char *post) {
+	String str = {0};
 	CURLcode code;
 	// Sharing curl handle is not safe in multithreaded scenario
 	CURL *curl = curl_easy_init();
 	if(!curl) {
-		return NULL;
+		return str;
 	}
+	str = string_new(NULL);
 	char buff[CURL_ERROR_SIZE];
-	String str = string_new(NULL);
 	curl_easy_setopt(curl, CURLOPT_URL, url);
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_callback_string);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &str);
@@ -382,14 +383,21 @@ json_object *microlauncher_http_get_json(const char *url, struct curl_slist *hea
 	}
 	code = curl_easy_perform(curl);
 	curl_easy_cleanup(curl);
-	json_object *obj = NULL;
-	if(code == CURLE_OK) {
-		obj = json_tokener_parse(str.data);
-		string_destroy(&str);
-	} else {
+	if(code != CURLE_OK) {
 		g_print("CURL error (%d) on %s\n", code, url);
 		g_print("%s\n", buff);
+		string_destroy(&str);
 	}
+	return str;
+}
+
+json_object *microlauncher_http_get_json(const char *url, struct curl_slist *headers, const char *post) {
+	String str = microlauncher_http_get_string(url, headers, post);
+	if(!str.data) {
+		return NULL;
+	}
+	json_object *obj = json_tokener_parse(str.data);
+	string_destroy(&str);
 	return obj;
 }
 
@@ -871,6 +879,7 @@ struct Settings *microlauncher_get_settings(void) {
 
 static void load_default_runtimes(void) {
 	char path[PATH_MAX];
+	const char *jvmPath;
 	const char **jvmDir = JVM_LOCATIONS;
 	char *dir;
 	const char *suffix;
@@ -891,13 +900,17 @@ static void load_default_runtimes(void) {
 		const char *entry;
 		while((entry = g_dir_read_name(gdir))) {
 			char *full_path = g_build_filename(dir, entry, suffix, NULL);
+#ifdef G_OS_WIN32
+			jvmPath = full_path;
+#else
 			realpath(full_path, path);
-			free(full_path);
-			if(g_file_query_file_type(g_file_new_for_path(path), 0, NULL) == G_FILE_TYPE_REGULAR) {
+			jvmPath = path;
+#endif
+			if(g_file_query_file_type(g_file_new_for_path(jvmPath), 0, NULL) == G_FILE_TYPE_REGULAR) {
 				GSList *data = settings.javaRuntimes;
 				while(data) {
 					JavaRuntime *runtime = data->data;
-					if(strequal(runtime->location, path)) {
+					if(strequal(runtime->location, jvmPath)) {
 						break;
 					}
 					data = data->next;
@@ -906,9 +919,10 @@ static void load_default_runtimes(void) {
 				if(data) {
 					continue;
 				}
-				JavaRuntime *runtime = microlauncher_java_runtime_new(path);
+				JavaRuntime *runtime = microlauncher_java_runtime_new(jvmPath);
 				settings.javaRuntimes = g_slist_append(settings.javaRuntimes, runtime);
 			}
+			free(full_path);
 		}
 	}
 }

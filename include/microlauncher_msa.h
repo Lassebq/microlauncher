@@ -7,10 +7,12 @@
 #define URL_OAUTH2_DEVICE "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode"
 #define URL_MCAPI_XBOXLOGIN "https://api.minecraftservices.com/authentication/login_with_xbox"
 #define URL_MCAPI_PROFILE "https://api.minecraftservices.com/minecraft/profile"
+#define URL_SESSIONSERVER_PROFILE "https://sessionserver.mojang.com/session/minecraft/profile/%s"
 
 struct MinecraftProfile {
 	char *username;
 	char *uuid;
+	char *texUrl;
 };
 
 struct MicrosoftUser {
@@ -22,6 +24,7 @@ struct MicrosoftUser {
 	char *uhs;
 	char *xsts_token;
 	char *mc_access_token;
+	struct MinecraftProfile mc_profile;
 };
 
 struct DeviceCodeOAuthResponse {
@@ -39,4 +42,5 @@ int microlauncher_msa_device_token(const char *device_code, struct MicrosoftUser
 int microlauncher_msa_refresh_token(const char *refresh_token, struct MicrosoftUser *user);
 void microlauncher_msa_destroy_device_code(struct DeviceCodeOAuthResponse *response);
 bool microlauncher_msa_login(struct MicrosoftUser *user, char **error_message);
-struct MinecraftProfile microlauncher_msa_get_profile(const char *accessToken);
+struct MinecraftProfile microlauncher_msa_get_profile(const char *uuid);
+struct MinecraftProfile microlauncher_msa_get_profile_by_token(struct MicrosoftUser *user);

@@ -167,7 +167,7 @@ bool microlauncher_account_auth_user(struct Callbacks callbacks, MicrolauncherAc
 				goto cancel;
 			}
 			run_callback(progress_update, (double)i++ / steps, "Getting profile");
-			struct MinecraftProfile profile = microlauncher_msa_get_profile(msuser->mc_access_token);
+			struct MinecraftProfile profile = microlauncher_msa_get_profile_by_token(msuser);
 			if(!profile.username || (cancellable && g_cancellable_is_cancelled(cancellable))) {
 				errorMessage = "Could not get Minecraft profile";
 				goto cancel;

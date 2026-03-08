@@ -1,5 +1,6 @@
 #pragma once
 
+#include "util/util.h"
 #include <curl/curl.h>
 #include <gio/gio.h>
 #include <glib.h>
@@ -47,5 +48,6 @@ GSList **microlauncher_get_instances(void);
 GSList **microlauncher_get_accounts(void);
 void microlauncher_set_callbacks(struct Callbacks callbacks);
 bool microlauncher_auth_user(MicrolauncherAccount *user, GCancellable *cancellable);
+String microlauncher_http_get_string(const char *url, struct curl_slist *headers, const char *post);
 json_object *microlauncher_http_get_json(const char *url, struct curl_slist *headers, const char *post);
 GHashTable *microlauncher_get_manifest(void);

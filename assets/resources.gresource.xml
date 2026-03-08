@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+    <gresource prefix="/io/github/microlauncher/resources">
+        <file>char.png</file>
+        <file alias="grass_block_icon.png">render_1024x1024.png</file>
+    </gresource>
+</gresources>

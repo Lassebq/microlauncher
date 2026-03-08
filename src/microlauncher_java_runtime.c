@@ -141,6 +141,9 @@ int java_get_major_version(JavaRuntime *runtime) {
 	GValue value = G_VALUE_INIT;
 	g_object_get_property(G_OBJECT(runtime), "version", &value);
 	const char *str = g_value_get_string(&value);
+	if(!str) {
+		return -1;
+	}
 	if(strncmp(str, "1.", 2) == 0) {
 		str = str + 2;
 	}

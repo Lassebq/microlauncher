@@ -1,14 +1,16 @@
+#include "json_tokener.h"
 #include <glib.h>
 #include <glib/gprintf.h>
+#include <inttypes.h>
 #include <json.h>
 #include <json_object.h>
 #include <json_types.h>
 #include <microlauncher.h>
 #include <microlauncher_msa.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <util/json_util.h>
 #include <util/util.h>
-#include <inttypes.h>
 
 bool microlauncher_msa_xboxlive_auth(struct MicrosoftUser *user) {
 	time_t tm;
@@ -134,7 +136,9 @@ bool microlauncher_msa_login(struct MicrosoftUser *user, char **error_message) {
 	}
 	char *accessToken = g_strdup(json_get_string(response, "access_token"));
 	if(!accessToken) {
-		*error_message = g_strdup(json_get_string(response, "error"));
+		if(error_message) {
+			*error_message = g_strdup(json_get_string(response, "error"));
+		}
 		json_object_put(response);
 		return false;
 	}
@@ -145,7 +149,49 @@ bool microlauncher_msa_login(struct MicrosoftUser *user, char **error_message) {
 	return true;
 }
 
-struct MinecraftProfile microlauncher_msa_get_profile(const char *accessToken) {
+struct MinecraftProfile microlauncher_msa_get_profile(const char *uuid) {
+	struct MinecraftProfile profile = {0};
+	if(!uuid) {
+		return profile;
+	}
+	char url[PATH_MAX];
+	snprintf(url, PATH_MAX, URL_SESSIONSERVER_PROFILE, uuid);
+	json_object *response = microlauncher_http_get_json(url, NULL, NULL);
+	profile.username = g_strdup(json_get_string(response, "name"));
+	profile.uuid = g_strdup(json_get_string(response, "id"));
+	json_object *obj;
+	if(response) {
+		json_object *props = json_object_object_get(response, "properties");
+
+		size_t length = json_object_is_type(props, json_type_array) ? json_object_array_length(props) : 0;
+		for(size_t i = 0; i < length; i++) {
+			obj = json_object_array_get_idx(props, i);
+			if(strequal(json_get_string(obj, "name"), "textures")) {
+				gsize size = 0;
+				guchar *base64decode = g_base64_decode(json_get_string(obj, "value"), &size);
+				char *str = malloc(size + 1);
+				snprintf(str, size + 1, "%s", base64decode);
+				str[size] = 0;
+				json_object *decodedJson = json_tokener_parse(str);
+				obj = json_object_object_get(decodedJson, "textures");
+				obj = json_object_object_get(obj, "SKIN");
+				profile.texUrl = g_strdup(json_get_string(obj, "url"));
+				json_object_put(decodedJson);
+				g_free(base64decode);
+				g_free(str);
+				break;
+			}
+		}
+	}
+	json_object_put(response);
+	return profile;
+}
+
+struct MinecraftProfile microlauncher_msa_get_profile_by_token(struct MicrosoftUser *msuser) {
+	if(msuser->mc_profile.username) {
+		return msuser->mc_profile;
+	}
+	const char *accessToken = msuser->mc_access_token;
 	struct MinecraftProfile profile = {0};
 	struct curl_slist *headers = NULL;
 	char *str = g_strdup_printf("Authorization: Bearer %s", accessToken);
@@ -154,7 +200,19 @@ struct MinecraftProfile microlauncher_msa_get_profile(const char *accessToken) {
 	free(str);
 	profile.username = g_strdup(json_get_string(response, "name"));
 	profile.uuid = g_strdup(json_get_string(response, "id"));
+	json_object *skins = json_object_object_get(response, "skins");
+	json_object *obj;
+
+	size_t length = json_object_is_type(skins, json_type_array) ? json_object_array_length(skins) : 0;
+	for(size_t i = 0; i < length; i++) {
+		obj = json_object_array_get_idx(skins, i);
+		if(strequal(json_get_string(obj, "state"), "ACTIVE")) {
+			profile.texUrl = g_strdup(json_get_string(obj, "url"));
+		}
+	}
+
 	json_object_put(response);
+	msuser->mc_profile = profile;
 	return profile;
 }
 
