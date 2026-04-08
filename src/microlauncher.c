@@ -2,6 +2,7 @@
 #include "glib/gstdio.h"
 #include "gtk/gtk.h"
 #include "microlauncher_java_runtime.h"
+#include <ctype.h>
 #include <curl/curl.h>
 #include <curl/easy.h>
 #include <gio/gio.h>
@@ -177,6 +178,7 @@ void microlauncher_load_instance(json_object *obj, MicrolauncherInstance *instan
 	instance->icon = g_strdup(json_get_string(obj, "icon"));
 	load_list(json_object_object_get(obj, "gameArgs"), &instance->extraGameArgs, add_string_val);
 	load_list(json_object_object_get(obj, "jvmArgs"), &instance->jvmArgs, add_string_val);
+	load_list(json_object_object_get(obj, "prefixCommand"), &instance->prefixCommand, add_string_val);
 }
 
 void microlauncher_save_instance(json_object *obj, MicrolauncherInstance *instance) {
@@ -187,6 +189,7 @@ void microlauncher_save_instance(json_object *obj, MicrolauncherInstance *instan
 	json_set_string(obj, "icon", instance->icon);
 	json_object_object_add(obj, "gameArgs", save_list(instance->extraGameArgs, put_string_obj));
 	json_object_object_add(obj, "jvmArgs", save_list(instance->jvmArgs, put_string_obj));
+	json_object_object_add(obj, "prefixCommand", save_list(instance->prefixCommand, put_string_obj));
 }
 
 bool microlauncher_init_config(void) {
@@ -553,8 +556,9 @@ bool microlauncher_fetch_library(json_object *libObj, const char *libraries_path
 	return true;
 }
 
-json_object *merge_json_object(json_object *base, json_object *overlay, bool incrementRef) {
+json_object *merge_json_object(json_object *base, json_object *overlay, bool incrementRef, bool append) {
 	size_t n;
+	size_t n1;
 	if(!overlay) {
 		return base;
 	}
@@ -564,12 +568,13 @@ json_object *merge_json_object(json_object *base, json_object *overlay, bool inc
 		if(json_object_get_type(overlayMember) == json_object_get_type(baseMember)) {
 			if(json_object_is_type(baseMember, json_type_array)) {
 				n = json_object_array_length(overlayMember);
+				n1 = json_object_array_length(baseMember);
 				for(size_t i = 0; i < n; i++) {
 					json_object *iter = json_object_array_get_idx(overlayMember, i);
 					if(incrementRef) {
 						json_object_get(iter);
 					}
-					json_object_array_insert_idx(baseMember, i, iter);
+					json_object_array_insert_idx(baseMember, (append ? n1 : 0) + i, iter);
 				}
 			} else {
 				if(incrementRef) {
@@ -610,7 +615,7 @@ json_object *inherit_json(const char *versions_path, const char *id, bool allowU
 		}
 		json_object *member = json_object_object_get(obj, "arguments");
 		if(member) {
-			merge_json_object(member, json_object_object_get(thisObj, "arguments"), true);
+			merge_json_object(member, json_object_object_get(thisObj, "arguments"), true, true);
 			json_object_object_del(thisObj, "arguments");
 		}
 		// Remember the original id of client download to avoid downloading duplicate in inherited JSONs
@@ -621,7 +626,7 @@ json_object *inherit_json(const char *versions_path, const char *id, bool allowU
 				json_set_string(member, "id", json_get_string(obj, "id"));
 			}
 		}
-		merge_json_object(obj, thisObj, true);
+		merge_json_object(obj, thisObj, true, false);
 
 		json_object_put(thisObj);
 		return obj;
@@ -945,6 +950,7 @@ void microlauncher_load_settings(void) {
 	settings.height = json_get_int(obj, "height");
 	settings.use_zink = json_get_bool(obj, "zink");
 	settings.gpu_id = g_strdup(getenv("DRI_PRIME"));
+	settings.hideOnLaunch = json_get_bool(obj, "hideOnLaunch");
 	load_list(json_object_object_get(obj, "javaRuntimes"), &settings.javaRuntimes, load_runtime);
 
 	load_default_runtimes();
@@ -993,6 +999,7 @@ void microlauncher_save_settings(void) {
 	json_set_bool(obj, "update", settings.allowUpdate);
 	json_set_bool(obj, "demo", settings.demo);
 	json_set_bool(obj, "zink", settings.use_zink);
+	json_set_bool(obj, "hideOnLaunch", settings.hideOnLaunch);
 	if(settings.launcher_root) {
 		json_set_string(obj, "launcherRoot", settings.launcher_root);
 	}
@@ -1028,6 +1035,72 @@ void microlauncher_save_settings(void) {
 	snprintf(pathbuf, PATH_MAX, "%s/microlauncher/instances.json", XDG_DATA_HOME);
 	json_to_file(obj, pathbuf, JSON_C_TO_STRING_NOSLASHESCAPE | JSON_C_TO_STRING_PRETTY);
 	json_object_put(obj);
+}
+
+static char *instance_name_to_id(const char *name) {
+	char *instance_id = g_strdup_printf("microlauncher-%s", name);
+	char *str = instance_id;
+	while(*str) {
+		if(*str == ' ') {
+			*str = '-';
+		} else {
+			*str = tolower(*str);
+		}
+		str++;
+	}
+	return instance_id;
+}
+
+void microlauncher_update_launcher(MicrolauncherInstance *inst, bool create) {
+	char path[PATH_MAX];
+#ifndef G_OS_WIN32
+	snprintf(path, PATH_MAX, "%s/applications/microlauncher-%s.desktop", XDG_DATA_HOME, inst->name);
+	if(!create) {
+		// Doesn't exist or not writable
+		if(access(path, W_OK) != 0) {
+			return;
+		}
+	}
+	FILE *fd = fopen_mkdir(path, "wb");
+	char *instid = instance_name_to_id(inst->name);
+	fprintf(fd,
+			"#!/usr/bin/env xdg-open\n"
+			"[Desktop Entry]\n"
+			"Name=%s\n"
+			"Exec=microlauncher --instance \"%s\" --saved-user\n"
+			"StartupWMClass=%s\n",
+			inst->name, inst->name, instid);
+	if(inst->icon) {
+		fprintf(fd, "Icon=%s\n", inst->icon);
+	}
+	fprintf(fd,
+			"Terminal=false\n"
+			"Type=Application\n"
+			"Categories=Game;\n");
+	fclose(fd);
+	free(instid);
+#else
+	char dir[PATH_MAX];
+	if(SHGetFolderPathA(NULL, CSIDL_STARTMENU, NULL, 0, dir) == S_OK) {
+		snprintf(path, PATH_MAX, "%s/Programs/MicroLauncher/%s.lnk", dir, inst->name);
+		if(!create) {
+			// Doesn't exist or not writable
+			if(access(path, W_OK) != 0) {
+				return;
+			}
+		}
+		char *dirname = g_path_get_dirname(path);
+		if(g_mkdir_with_parents(dirname, 0775) == 0) {
+
+			char *cmdline = g_strdup_printf("--instance \"%s\" --saved-user", inst->name);
+			g_print("%s\n", path);
+			free(dirname);
+			dirname = g_path_get_dirname(EXEC_BINARY);
+			CreateShortcut(EXEC_BINARY, cmdline, path, SW_SHOWNORMAL, dirname, EXEC_BINARY, 0);
+		}
+		free(dirname);
+	}
+#endif
 }
 
 static char *apply_replaces(const char *const *replaces, const char *str) {
@@ -1167,6 +1240,9 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	char *auth_session = g_strdup_printf("token:%s:%s", auth_token ? auth_token : "", auth_uuid ? auth_uuid : "");
 	malloc_strs[m++] = auth_session;
 
+	char *instance_id = instance_name_to_id(instance->name);
+	malloc_strs[m++] = instance_id;
+
 	char width_str[11];
 	snprintf(width_str, sizeof(width_str), "%d", settings.width);
 	char height_str[11];
@@ -1193,6 +1269,8 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 		"${resolution_width}", width_str,
 		"${resolution_height}", height_str,
 		"${instance_icon}", instance->icon,
+		"${instance_name}", instance->name,
+		"${instance_id}", instance_id,
 		// TODO quickplay
 		NULL};
 	GSList *features = NULL;
@@ -1205,12 +1283,19 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	if(settings.fullscreen) {
 		features = g_slist_append(features, g_strdup("has_fullscreen"));
 	}
+	features = g_slist_append(features, g_strdup("has_instance_name"));
+	features = g_slist_append(features, g_strdup("has_instance_id"));
 	int c = 0;
 	main_class = json_get_string(json, "mainClass");
 
 	c = 0;
 	char *argv[256];
 #ifdef G_OS_UNIX
+	GSList *prefixArg = instance->prefixCommand;
+	while(prefixArg) {
+		argv[c++] = prefixArg->data;
+		prefixArg = prefixArg->next;
+	}
 	argv[c++] = "env";
 	GtkSettings *gtksettings = gtk_settings_get_default();
 	int xcursize = 24;
@@ -1256,12 +1341,10 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	}
 #endif
 
-	if(instance->jvmArgs) {
-		GSList *node = instance->jvmArgs;
-		while(node) {
-			argv[c++] = node->data;
-			node = node->next;
-		}
+	GSList *node = instance->jvmArgs;
+	while(node) {
+		argv[c++] = node->data;
+		node = node->next;
 	}
 	argv[c++] = (char *)main_class;
 

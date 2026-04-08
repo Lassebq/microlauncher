@@ -8,6 +8,9 @@
 #include <microlauncher_account.h>
 #include <microlauncher_instance.h>
 #include <stdbool.h>
+#ifdef G_OS_WIN32
+#include <shlobj.h>
+#endif
 
 #define MOJANG_MANIFEST "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
 #define BETTERJSONS_MANIFEST "https://mcphackers.org/BetterJSONs/version_manifest_v2.json"
@@ -33,6 +36,7 @@ struct Settings {
 	bool demo;
 	bool allowUpdate;
 	bool use_zink;
+	bool hideOnLaunch;
 	char *launcher_root;
 	char *manifest_url;
 	char *gpu_id;
@@ -47,6 +51,7 @@ struct Settings *microlauncher_get_settings(void);
 GSList **microlauncher_get_instances(void);
 GSList **microlauncher_get_accounts(void);
 void microlauncher_set_callbacks(struct Callbacks callbacks);
+void microlauncher_update_launcher(MicrolauncherInstance *instance, bool create);
 bool microlauncher_auth_user(MicrolauncherAccount *user, GCancellable *cancellable);
 String microlauncher_http_get_string(const char *url, struct curl_slist *headers, const char *post);
 json_object *microlauncher_http_get_json(const char *url, struct curl_slist *headers, const char *post);

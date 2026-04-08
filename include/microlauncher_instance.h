@@ -13,6 +13,7 @@ struct _MicrolauncherInstance {
 	char *javaLocation;
 	GSList *extraGameArgs;
 	GSList *jvmArgs;
+	GSList *prefixCommand;
 };
 
 G_DECLARE_FINAL_TYPE(MicrolauncherInstance, microlauncher_instance, MICROLAUNCHER, INSTANCE, GObject);

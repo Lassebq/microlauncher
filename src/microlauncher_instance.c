@@ -13,6 +13,7 @@ enum {
 	PROP_JAVA_LOCATION,
 	PROP_GAME_ARGS_LIST,
 	PROP_JVM_ARGS_LIST,
+	PROP_PREFIX_COMMAND_LIST,
 	N_PROPERTIES
 };
 
@@ -66,6 +67,13 @@ static PropertyDef prop_definitions[N_PROPERTIES] = {
 		"jvm-args",
 		G_TYPE_POINTER,
 		offsetof(MicrolauncherInstance, jvmArgs),
+		G_PARAM_READWRITE,
+		(GFreeFunc)g_slist_free
+	},
+	[PROP_PREFIX_COMMAND_LIST] = {
+		"prefix-command",
+		G_TYPE_POINTER,
+		offsetof(MicrolauncherInstance, prefixCommand),
 		G_PARAM_READWRITE,
 		(GFreeFunc)g_slist_free
 	}

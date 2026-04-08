@@ -52,6 +52,7 @@ static GtkCheckButton *checkFullscreen;
 static GtkCheckButton *checkDemo;
 static GtkCheckButton *checkUpdate;
 static GtkCheckButton *checkUseZink;
+static GtkCheckButton *checkHideOnLaunch;
 static GtkEntry *widthEntry;
 static GtkEntry *heightEntry;
 static GtkRevealer *revealer;
@@ -355,6 +356,7 @@ struct CreateInstance {
 	GtkImage *instanceIcon;
 	GtkEntry *instanceGameArgs;
 	GtkEntry *instanceJvmArgs;
+	GtkEntry *instancePrefixCommand;
 	GtkColumnView *versionView;
 	GtkWindow *dialog;
 	MicrolauncherInstance *toReplace;
@@ -390,6 +392,7 @@ static void create_or_modify_instance(GtkButton *button, void *userdata) {
 
 	inst->extraGameArgs = NULL;
 	inst->jvmArgs = NULL;
+	inst->prefixCommand = NULL;
 	char *str = g_strdup(gtk_entry_get_text(createInstance->instanceGameArgs));
 	char **args = get_commandv(str);
 	int i = 0;
@@ -408,6 +411,15 @@ static void create_or_modify_instance(GtkButton *button, void *userdata) {
 	}
 	free(str);
 	free(args);
+	i = 0;
+	str = g_strdup(gtk_entry_get_text(createInstance->instancePrefixCommand));
+	args = get_commandv(str);
+	while(args && args[i]) {
+		inst->prefixCommand = g_slist_append(inst->prefixCommand, g_strdup(args[i]));
+		i++;
+	}
+	free(str);
+	free(args);
 
 	GtkSingleSelection *selection = GTK_SINGLE_SELECTION(gtk_column_view_get_model(createInstance->versionView));
 	VersionItem *item = gtk_single_selection_get_selected_item(selection);
@@ -417,6 +429,7 @@ static void create_or_modify_instance(GtkButton *button, void *userdata) {
 		add_instance(inst, G_MAXUINT);
 	}
 	microlauncher_gui_refresh_instance();
+	microlauncher_update_launcher(inst, false);
 	gtk_window_destroy(createInstance->dialog);
 }
 
@@ -427,6 +440,9 @@ struct TryScroll {
 };
 
 static gboolean try_scroll_to(struct TryScroll *tryScroll) {
+	if(tryScroll->row == GTK_INVALID_LIST_POSITION) {
+		return false;
+	}
 	GtkScrollInfo *scrollInfo = gtk_scroll_info_new();
 	gtk_scroll_info_set_enable_vertical(scrollInfo, true);
 	if(GTK_IS_COLUMN_VIEW(tryScroll->view)) {
@@ -487,6 +503,20 @@ static void set_entry_filter(GtkEditable *editable, gpointer user_data) {
 	GtkStringFilter *filter = GTK_STRING_FILTER(user_data);
 	const char *text = gtk_editable_get_text(editable);
 	gtk_string_filter_set_search(filter, text);
+}
+
+static String join_string_list(GSList *list) {
+
+	String str = string_new(NULL);
+	GSList *node = list;
+	while(node) {
+		string_append(&str, node->data);
+		if(node->next) {
+			string_append_char(&str, ' ');
+		}
+		node = node->next;
+	}
+	return str;
 }
 
 static void microlauncher_modify_instance_window(GtkButton *button, MicrolauncherInstance *instance) {
@@ -601,15 +631,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	entry = GTK_ENTRY(widget);
 	createInstance->instanceGameArgs = entry;
 	if(instance) {
-		String str = string_new(NULL);
-		GSList *node = instance->extraGameArgs;
-		while(node) {
-			string_append(&str, node->data);
-			if(node->next) {
-				string_append_char(&str, ' ');
-			}
-			node = node->next;
-		}
+		String str = join_string_list(instance->extraGameArgs);
 		gtk_entry_set_text(entry, str.data);
 		string_destroy(&str);
 	}
@@ -623,15 +645,21 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	entry = GTK_ENTRY(widget);
 	createInstance->instanceJvmArgs = entry;
 	if(instance) {
-		String str = string_new(NULL);
-		GSList *node = instance->jvmArgs;
-		while(node) {
-			string_append(&str, node->data);
-			if(node->next) {
-				string_append_char(&str, ' ');
-			}
-			node = node->next;
-		}
+		String str = join_string_list(instance->jvmArgs);
+		gtk_entry_set_text(entry, str.data);
+		string_destroy(&str);
+	}
+	gtk_grid_attach(grid, widget, 2, row++, 1, 1);
+
+	widget = gtk_label_new("Prefix command:");
+	gtk_widget_set_halign(widget, GTK_ALIGN_START);
+	gtk_grid_attach(grid, widget, 1, row, 1, 1);
+
+	widget = gtk_entry_new();
+	entry = GTK_ENTRY(widget);
+	createInstance->instancePrefixCommand = entry;
+	if(instance) {
+		String str = join_string_list(instance->prefixCommand);
 		gtk_entry_set_text(entry, str.data);
 		string_destroy(&str);
 	}
@@ -713,6 +741,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 
 	struct TryScroll *tryScroll = g_new0(struct TryScroll, 1);
 	tryScroll->view = columnView;
+	tryScroll->row = GTK_INVALID_LIST_POSITION;
 	if(instance) {
 		guint n = g_list_model_get_n_items(G_LIST_MODEL(model));
 		for(guint i = 0; i < n; i++) {
@@ -877,6 +906,9 @@ static gboolean microlauncher_gui_enable_play(void *userdata) {
 	gtk_widget_set_sensitive(GTK_WIDGET(playButton), true);
 	gtk_widget_set_sensitive(GTK_WIDGET(instancesPage), true);
 	gtk_widget_set_sensitive(GTK_WIDGET(accountsPage), true);
+	if(settings->hideOnLaunch) {
+		gtk_widget_set_visible(GTK_WIDGET(window), true);
+	}
 	return false;
 }
 
@@ -897,6 +929,7 @@ static void apply_settings(void) {
 	settings->use_zink = gtk_check_button_get_active(checkUseZink);
 #endif
 	settings->demo = gtk_check_button_get_active(checkDemo);
+	settings->hideOnLaunch = gtk_check_button_get_active(checkHideOnLaunch);
 }
 
 static void clicked_play(void) {
@@ -1011,6 +1044,11 @@ static GtkWidget *microlauncher_gui_page_launcher(void) {
 	gtk_widget_set_hexpand(widget, false);
 	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
 
+	widget = gtk_check_button_new_with_label("Hide launcher");
+	checkHideOnLaunch = GTK_CHECK_BUTTON(widget);
+	gtk_widget_set_hexpand(widget, false);
+	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
+
 	gtk_box_append(GTK_BOX(box), frame);
 
 	widget = gtk_button_new_with_label("Play");
@@ -1110,43 +1148,6 @@ static void instance_list_view_setup_factory(GtkListItemFactory *factory, GtkLis
 	g_object_set_data_full(G_OBJECT(list_item), "row-widgets", rw, g_free);
 }
 
-static void microlauncher_create_launcher(MicrolauncherInstance *inst) {
-	char path[PATH_MAX];
-#ifndef G_OS_WIN32
-	snprintf(path, PATH_MAX, "%s/applications/microlauncher-%s.desktop", XDG_DATA_HOME, inst->name);
-	FILE *fd = fopen_mkdir(path, "wb");
-	fprintf(fd,
-			"#!/usr/bin/env xdg-open\n"
-			"[Desktop Entry]\n"
-			"Name=%s\n"
-			"Exec=microlauncher --instance \"%s\" --saved-user\n",
-			inst->name, inst->name);
-	if(inst->icon) {
-		fprintf(fd, "Icon=%s\n", inst->icon);
-	}
-	fprintf(fd,
-			"Terminal=false\n"
-			"Type=Application\n"
-			"Categories=Game;\n");
-	fclose(fd);
-#else
-	char dir[PATH_MAX];
-	if(SHGetFolderPathA(NULL, CSIDL_STARTMENU, NULL, 0, dir) == S_OK) {
-		snprintf(path, PATH_MAX, "%s/Programs/MicroLauncher/%s.lnk", dir, inst->name);
-		char *dirname = g_path_get_dirname(path);
-		if(g_mkdir_with_parents(dirname, 0775) == 0) {
-
-			char *cmdline = g_strdup_printf("--instance \"%s\" --saved-user", inst->name);
-			g_print("%s\n", path);
-			free(dirname);
-			dirname = g_path_get_dirname(EXEC_BINARY);
-			CreateShortcut(EXEC_BINARY, cmdline, path, SW_SHOWNORMAL, dirname, EXEC_BINARY, 0);
-		}
-		free(dirname);
-	}
-#endif
-}
-
 static void instance_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant *parameter, gpointer *data) {
 	MicrolauncherInstance *inst = (MicrolauncherInstance *)data;
 	if(strcmp(g_action_get_name(G_ACTION(simple_action)), "play") == 0) {
@@ -1167,7 +1168,7 @@ static void instance_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant
 		free(str);
 		add_instance(copy, g_slist_index(instances, inst) + 1);
 	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "create-launcher") == 0) {
-		microlauncher_create_launcher(inst);
+		microlauncher_update_launcher(inst, true);
 	} else if(strcmp(g_action_get_name(G_ACTION(simple_action)), "delete") == 0) {
 		remove_instance_button_cb(NULL, inst);
 	}
@@ -1420,6 +1421,7 @@ static void account_list_view_setup_factory(GtkListItemFactory *factory, GtkList
 
 	widget = gtk_image_new();
 	gtk_image_set_pixel_size(GTK_IMAGE(widget), 48);
+	gtk_image_set_from_icon_name(GTK_IMAGE(widget), "process-working");
 	gtk_widget_set_margin_end(widget, 10);
 	rw->icon = GTK_IMAGE(widget);
 	gtk_grid_attach(grid, widget, 0, 0, 1, 1);
@@ -1451,10 +1453,36 @@ static void account_action(GSimpleAction *simple_action, G_GNUC_UNUSED GVariant 
 	}
 }
 
-static void render_profile_face(GtkImage *image, MicrolauncherAccount *account) {
+struct AsyncImageFromPixbuf {
+	GtkImage *icon;
+	GdkPixbuf *pixbuf;
+};
+
+struct RenderProfileData {
+	GtkImage *icon;
+	MicrolauncherAccount *account;
+};
+
+static gboolean set_profile_face_image(struct AsyncImageFromPixbuf *imagePixbuf) {
+	GdkPixbuf *pixbuf = imagePixbuf->pixbuf;
+	if(pixbuf) {
+		GdkPixbuf *face = gdk_pixbuf_new_subpixbuf(pixbuf, 8, 8, 8, 8);
+		GdkPixbuf *faceOverlay = gdk_pixbuf_new_subpixbuf(pixbuf, 40, 8, 8, 8);
+		gdk_pixbuf_composite(faceOverlay, face, 0, 0, 8, 8, 0, 0, 1.0, 1.0, GDK_INTERP_NEAREST, 255);
+		GdkPixbuf *scaled = gdk_pixbuf_scale_simple(face, 48, 48, GDK_INTERP_NEAREST);
+		gtk_image_set_from_pixbuf(imagePixbuf->icon, scaled);
+		g_object_unref(scaled);
+		g_object_unref(face);
+		g_object_unref(faceOverlay);
+	}
+	free(imagePixbuf);
+	return false;
+}
+
+static void render_profile_face(GTask *task, gpointer source_object, struct RenderProfileData *profileData, GCancellable *cancellable) {
 	String png;
 	GdkPixbuf *pixbuf = NULL;
-	struct MinecraftProfile profile = microlauncher_msa_get_profile(account->uuid);
+	struct MinecraftProfile profile = microlauncher_msa_get_profile(profileData->account->uuid);
 	if(profile.texUrl) {
 		png = microlauncher_http_get_string(profile.texUrl, NULL, NULL);
 		pixbuf = gdk_pixbuf_new_from_stream(g_memory_input_stream_new_from_data(png.data, png.length, NULL), NULL, NULL);
@@ -1463,13 +1491,10 @@ static void render_profile_face(GtkImage *image, MicrolauncherAccount *account) 
 	if(!pixbuf) {
 		pixbuf = gdk_pixbuf_new_from_resource("/io/github/microlauncher/resources/char.png", NULL);
 	}
-	if(pixbuf) {
-		GdkPixbuf *face = gdk_pixbuf_new_subpixbuf(pixbuf, 8, 8, 8, 8);
-		GdkPixbuf *faceOverlay = gdk_pixbuf_new_subpixbuf(pixbuf, 40, 8, 8, 8);
-		gdk_pixbuf_composite(faceOverlay, face, 0, 0, 8, 8, 0, 0, 1.0, 1.0, GDK_INTERP_NEAREST, 255);
-		GdkPixbuf *scaled = gdk_pixbuf_scale_simple(face, 48, 48, GDK_INTERP_NEAREST);
-		gtk_image_set_from_pixbuf(image, scaled);
-	}
+	struct AsyncImageFromPixbuf *asyncImage = g_new(struct AsyncImageFromPixbuf, 1);
+	asyncImage->pixbuf = pixbuf;
+	asyncImage->icon = profileData->icon;
+	g_idle_add((GSourceFunc)set_profile_face_image, asyncImage);
 }
 
 static void account_list_view_bind_factory(GtkListItemFactory *factory, GtkListItem *list_item, gpointer user_data) {
@@ -1494,7 +1519,13 @@ static void account_list_view_bind_factory(GtkListItemFactory *factory, GtkListI
 	GSimpleActionGroup *actions = g_simple_action_group_new();
 	GSimpleAction *action;
 
-	render_profile_face(rw->icon, account);
+	struct RenderProfileData *profileData = g_new(struct RenderProfileData, 1);
+	profileData->account = account;
+	profileData->icon = rw->icon;
+	// g_idle_add((GSourceFunc)render_profile_face, profileData);
+	GTask *task = g_task_new(window, NULL, NULL, NULL);
+	g_task_set_task_data(task, profileData, g_free /* (GDestroyNotify) */);
+	g_task_run_in_thread(task, (GTaskThreadFunc)render_profile_face);
 
 	// action = g_simple_action_new("edit", NULL);
 	// g_signal_connect(action, "activate", G_CALLBACK(account_action), account);
@@ -1921,6 +1952,9 @@ static gboolean microlauncher_gui_enable_kill(void *userdata) {
 	instanceCancellable = NULL;
 	gtk_button_set_label(playButton, "Kill");
 	gtk_widget_set_sensitive(GTK_WIDGET(playButton), true);
+	if(settings->hideOnLaunch) {
+		gtk_widget_set_visible(GTK_WIDGET(window), false);
+	}
 	return false;
 }
 
@@ -2150,6 +2184,7 @@ static void activate(GtkApplication *app, gpointer user_data) {
 #ifndef DISABLE_GPU
 	gtk_check_button_set_active(checkUseZink, settings->use_zink);
 #endif
+	gtk_check_button_set_active(checkHideOnLaunch, settings->hideOnLaunch);
 
 	microlauncher_set_callbacks(callbacks);
 	g_signal_connect(window, "close-request", G_CALLBACK(close_request), NULL);

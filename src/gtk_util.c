@@ -152,6 +152,9 @@ GtkWidget *gtk_drop_down_simple_new(GtkStringList *list, GtkExpression *expressi
 }
 
 void gtk_image_set_from_file_pixbuf(GtkImage *image, const char *path) {
+	if(!path) {
+		return;
+	}
 	GError *error = NULL;
 	GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file(path, &error);
 	gtk_image_set_from_pixbuf(image, pixbuf);

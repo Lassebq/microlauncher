@@ -150,6 +150,7 @@ add_custom_command(
         COMMAND ${GLIB_COMPILE_RESOURCES} ${PROJECT_SOURCE_DIR}/assets/resources.gresource.xml --target=resources.c --generate-source --sourcedir=${PROJECT_SOURCE_DIR}/assets
         DEPENDS assets/resources.gresource.xml
         assets/char.png
+        assets/render_1024x1024.png
 )
 
 add_custom_target(generate_resources DEPENDS resources.c)
