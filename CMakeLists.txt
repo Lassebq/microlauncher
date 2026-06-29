@@ -3,6 +3,7 @@ project(MicroLauncher VERSION 1.0.0 LANGUAGES C CXX)
 
 set(MICROSOFT_CLIENT_ID "95984717-05f1-4b52-8a66-064d0e1e5b55" CACHE STRING "Azure application client ID used for microsoft authentication")
 set(MANIFEST_URL "" CACHE STRING "Version manifest URL")
+set(FAST_RESOURCE_CHECK false CACHE BOOL "Check assets and libraries by size only to avoid reading entire file")
 
 set(SOURCES
   src/microlauncher.c
@@ -24,7 +25,7 @@ endif()
 
 find_package(PkgConfig REQUIRED)
 set(DEPS
-    gtk4 json-c gio-2.0 glib-2.0 gobject-2.0 libcurl libcrypto libzip
+    gtk4 webkitgtk-6.0 json-c gio-2.0 glib-2.0 gobject-2.0 libcurl libcrypto libzip
 )
 if(UNIX AND NOT APPLE)
     list(APPEND DEPS uuid)
@@ -144,7 +145,7 @@ if(APPLE)
     )
 endif()
 
-add_executable(microlauncher WIN32 MACOSX_BUNDLE ${SOURCES} resources.c)
+add_executable(microlauncher MACOSX_BUNDLE ${SOURCES} resources.c)
 add_custom_command(
         OUTPUT resources.c
         COMMAND ${GLIB_COMPILE_RESOURCES} ${PROJECT_SOURCE_DIR}/assets/resources.gresource.xml --target=resources.c --generate-source --sourcedir=${PROJECT_SOURCE_DIR}/assets
@@ -155,6 +156,11 @@ add_custom_command(
 
 add_custom_target(generate_resources DEPENDS resources.c)
 add_dependencies(microlauncher generate_resources)
+if(FAST_RESOURCE_CHECK)
+    message(STATUS "Fast resources")
+    target_compile_definitions(microlauncher PRIVATE FAST_RESOURCE_CHECK=1)
+endif()
+
 if(NOT LIBPCI_FOUND)
     target_compile_definitions(microlauncher PRIVATE DISABLE_GPU=1)
 else()

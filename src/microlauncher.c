@@ -448,6 +448,7 @@ bool microlauncher_fetch_artifact(const char *url, const char *path, const char 
 	if(size != 0 && st.st_size != size) {
 		goto redownload;
 	}
+#ifndef FAST_RESOURCE_CHECK
 	Sha1 hash;
 	FILE *fd = fopen(path, "rb");
 	if(!fd) {
@@ -457,6 +458,7 @@ bool microlauncher_fetch_artifact(const char *url, const char *path, const char 
 	if(sha1 && strcmp(hash, sha1) != 0) {
 		goto redownload;
 	}
+#endif
 	return true; /* everything is fine and we can keep local lib */
 
 redownload:
@@ -494,15 +496,17 @@ bool microlauncher_fetch_library(json_object *libObj, const char *libraries_path
 		url = url2;
 	}
 
-	if(!microlauncher_fetch_artifact(
-		   url,
-		   realpath,
-		   NULL,
-		   json_get_string(artifact, "sha1"),
-		   json_get_int64(artifact, "size"),
-		   total_size, download_size)) {
-		snprintf(failedUrl, PATH_MAX, "%s", url);
-		return false;
+	if(!settings.useLocalLib || access(realpath, R_OK) != 0) {
+		if(!microlauncher_fetch_artifact(
+			   url,
+			   realpath,
+			   NULL,
+			   json_get_string(artifact, "sha1"),
+			   json_get_int64(artifact, "size"),
+			   total_size, download_size)) {
+			snprintf(failedUrl, PATH_MAX, "%s", url);
+			return false;
+		}
 	}
 
 	if(!natives) {
@@ -949,6 +953,7 @@ void microlauncher_load_settings(void) {
 	settings.width = json_get_int(obj, "width");
 	settings.height = json_get_int(obj, "height");
 	settings.use_zink = json_get_bool(obj, "zink");
+	settings.gpu_explicit = json_get_bool(obj, "gpu_explicit");
 	settings.gpu_id = g_strdup(getenv("DRI_PRIME"));
 	settings.hideOnLaunch = json_get_bool(obj, "hideOnLaunch");
 	load_list(json_object_object_get(obj, "javaRuntimes"), &settings.javaRuntimes, load_runtime);
@@ -999,6 +1004,7 @@ void microlauncher_save_settings(void) {
 	json_set_bool(obj, "update", settings.allowUpdate);
 	json_set_bool(obj, "demo", settings.demo);
 	json_set_bool(obj, "zink", settings.use_zink);
+	json_set_bool(obj, "gpu_explicit", settings.gpu_explicit);
 	json_set_bool(obj, "hideOnLaunch", settings.hideOnLaunch);
 	if(settings.launcher_root) {
 		json_set_string(obj, "launcherRoot", settings.launcher_root);
@@ -1309,7 +1315,7 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	}
 	argv[c++] = malloc_strs[m++] = g_strdup_printf("XCURSOR_SIZE=%d", xcursize);
 	if(settings.gpu_id) {
-		argv[c++] = malloc_strs[m++] = g_strdup_printf("DRI_PRIME=%s", settings.gpu_id);
+		argv[c++] = malloc_strs[m++] = g_strdup_printf(settings.gpu_explicit ? "DRI_PRIME=%s!" : "DRI_PRIME=%s", settings.gpu_id);
 	}
 	if(settings.use_zink) {
 		// Force nvidia drivers to use Mesa

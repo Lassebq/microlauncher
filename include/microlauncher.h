@@ -30,16 +30,18 @@ struct Settings {
 	MicrolauncherAccount *user;
 	MicrolauncherInstance *instance;
 	GSList *javaRuntimes;
+	char *launcher_root;
+	char *manifest_url;
+	char *gpu_id;
 	int width;
 	int height;
+	bool gpu_explicit;
 	bool fullscreen;
 	bool demo;
 	bool allowUpdate;
 	bool use_zink;
 	bool hideOnLaunch;
-	char *launcher_root;
-	char *manifest_url;
-	char *gpu_id;
+	bool useLocalLib;
 };
 
 MicrolauncherInstance *microlauncher_instance_get(GSList *list, const char *id);

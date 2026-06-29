@@ -14,10 +14,12 @@
 #include <microlauncher_msa.h>
 #include <microlauncher_version_item.h>
 #include <stdatomic.h>
+#include <stddef.h>
 #include <util/gtk_util.h>
 #include <util/json_util.h>
 #include <util/util.h>
 #include <util/xdgutil.h>
+#include <webkit/webkit.h>
 #ifdef G_OS_WIN32
 #include <shlobj.h>
 #include <windows.h>
@@ -52,7 +54,9 @@ static GtkCheckButton *checkFullscreen;
 static GtkCheckButton *checkDemo;
 static GtkCheckButton *checkUpdate;
 static GtkCheckButton *checkUseZink;
+static GtkCheckButton *checkExplicitGpu;
 static GtkCheckButton *checkHideOnLaunch;
+static GtkCheckButton *checkUseLocalLib;
 static GtkEntry *widthEntry;
 static GtkEntry *heightEntry;
 static GtkRevealer *revealer;
@@ -927,9 +931,72 @@ static void apply_settings(void) {
 	settings->allowUpdate = gtk_check_button_get_active(checkUpdate);
 #ifndef DISABLE_GPU
 	settings->use_zink = gtk_check_button_get_active(checkUseZink);
+	settings->gpu_explicit = gtk_check_button_get_active(checkExplicitGpu);
 #endif
 	settings->demo = gtk_check_button_get_active(checkDemo);
 	settings->hideOnLaunch = gtk_check_button_get_active(checkHideOnLaunch);
+	settings->useLocalLib = gtk_check_button_get_active(checkUseLocalLib);
+}
+
+static gboolean on_decide_policy(WebKitWebView *web_view,
+								 WebKitPolicyDecision *decision,
+								 WebKitPolicyDecisionType type,
+								 gpointer user_data) {
+
+	if(type == WEBKIT_POLICY_DECISION_TYPE_NAVIGATION_ACTION) {
+		WebKitNavigationPolicyDecision *nav_decision = WEBKIT_NAVIGATION_POLICY_DECISION(decision);
+		WebKitNavigationAction *action = webkit_navigation_policy_decision_get_navigation_action(nav_decision);
+		WebKitURIRequest *request = webkit_navigation_action_get_request(action);
+		const gchar *uri = webkit_uri_request_get_uri(request);
+
+		// If you want to block specific file extensions or patterns
+		if(g_str_has_suffix(uri, ".jar") || g_str_has_suffix(uri, ".zip") || g_str_has_suffix(uri, ".mrpack")) {
+			webkit_policy_decision_download(decision); // Stop the navigation/download entirely
+			g_print("Blocked download attempt for: %s\n", uri);
+			return TRUE; // Signal handled
+		}
+	}
+
+	else if(type == WEBKIT_POLICY_DECISION_TYPE_RESPONSE) {
+		WebKitResponsePolicyDecision *res_decision = WEBKIT_RESPONSE_POLICY_DECISION(decision);
+		WebKitURIResponse *response = webkit_response_policy_decision_get_response(res_decision);
+
+		// If the server explicitly says "this is a download" (Content-Disposition: attachment)
+		if(webkit_response_policy_decision_is_mime_type_supported(res_decision) == FALSE) {
+			webkit_policy_decision_ignore(decision);
+			g_print("Ignored unsupported MIME type (download prevented)\n");
+			return TRUE;
+		}
+	}
+
+	return FALSE; // Let WebKit handle it normally
+}
+
+static void on_download_mod_or_pack(WebKitNetworkSession *session, WebKitDownload *download, void *data) {
+	webkit_download_cancel(download);
+}
+
+static void show_get_mods(GtkWindow *parent) {
+	GtkWidget *widget;
+	GtkWindow *window = gtk_modal_dialog_new(parent);
+	gtk_window_set_default_size(window, 600, 800);
+	gtk_window_set_title(window, "Browse Mods");
+	gtk_window_set_transient_for(window, NULL);
+	gtk_window_set_modal(window, false);
+	GtkBox *box = GTK_BOX(gtk_box_new(GTK_ORIENTATION_VERTICAL, 0));
+	widget = gtk_entry_new();
+	gtk_widget_set_margin(widget, 10, 10, 10, 10);
+	gtk_editable_set_editable(GTK_EDITABLE(widget), false);
+	gtk_box_append(box, widget);
+	widget = webkit_web_view_new();
+	g_signal_connect(widget, "decide-policy", G_CALLBACK(on_decide_policy), NULL);
+	gtk_widget_set_vexpand(widget, true);
+	webkit_web_view_load_uri(WEBKIT_WEB_VIEW(widget), "https://modrinth.com/discover/mods");
+	WebKitNetworkSession *session = webkit_web_view_get_network_session(WEBKIT_WEB_VIEW(widget));
+	g_signal_connect(session, "download-started", G_CALLBACK(on_download_mod_or_pack), NULL);
+	gtk_box_append(box, widget);
+	gtk_window_set_child(window, GTK_WIDGET(box));
+	gtk_window_present(window);
 }
 
 static void clicked_play(void) {
@@ -958,7 +1025,7 @@ static void notify_gpu_change(GtkDropDown *dropDown, GParamSpec *pspec, GSList *
 }
 
 static GtkWidget *microlauncher_gui_page_launcher(void) {
-	GtkWidget *widget, *box, *boxOuter, *scrolledWindow, *frame;
+	GtkWidget *widget, *box, *box2, *boxOuter, *scrolledWindow, *frame;
 	GtkGrid *grid;
 	int grid_row;
 
@@ -1030,8 +1097,14 @@ static GtkWidget *microlauncher_gui_page_launcher(void) {
 	if(settings->gpu_id && (node = g_slist_find_custom(gpuIds, settings->gpu_id, (GCompareFunc)g_strcmp0))) {
 		gtk_drop_down_set_selected(GTK_DROP_DOWN(widget), g_slist_index(gpuIds, node->data));
 	}
+
+	box2 = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
 	widget = gtk_widget_with_label("Preferred GPU:", widget);
-	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
+	gtk_box_append(GTK_BOX(box2), widget);
+	widget = gtk_check_button_new_with_label("Explicit");
+	checkExplicitGpu = GTK_CHECK_BUTTON(widget);
+	gtk_box_append(GTK_BOX(box2), widget);
+	gtk_grid_attach(grid, box2, 0, grid_row++, 2, 1);
 
 	widget = gtk_check_button_new_with_label("Use Zink");
 	checkUseZink = GTK_CHECK_BUTTON(widget);
@@ -1046,6 +1119,11 @@ static GtkWidget *microlauncher_gui_page_launcher(void) {
 
 	widget = gtk_check_button_new_with_label("Hide launcher");
 	checkHideOnLaunch = GTK_CHECK_BUTTON(widget);
+	gtk_widget_set_hexpand(widget, false);
+	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
+
+	widget = gtk_check_button_new_with_label("Use local libraries (skip re-download for modified libraries)");
+	checkUseLocalLib = GTK_CHECK_BUTTON(widget);
 	gtk_widget_set_hexpand(widget, false);
 	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
 
@@ -2062,7 +2140,7 @@ static void init_gpus(void) {
 		if(!pci_filter_match(&filter, p)) {
 			continue;
 		}
-		snprintf(bdfbuf, sizeof(bdfbuf), "pci-%04d_%02u_%02u_%01u", p->domain, p->bus, p->dev, p->func);
+		snprintf(bdfbuf, sizeof(bdfbuf), "pci-%04x_%02x_%02x_%01x", p->domain, p->bus, p->dev, p->func);
 		pci_fill_info(p, PCI_FILL_IDENT);
 		char *s = pci_lookup_name(acc, devbuf, sizeof(devbuf), PCI_LOOKUP_VENDOR | PCI_LOOKUP_DEVICE, p->vendor_id, p->device_id);
 		gtk_string_list_append(gpuLabels, strdup(s));
@@ -2183,8 +2261,10 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	gtk_check_button_set_active(checkUpdate, settings->allowUpdate);
 #ifndef DISABLE_GPU
 	gtk_check_button_set_active(checkUseZink, settings->use_zink);
+	gtk_check_button_set_active(checkExplicitGpu, settings->gpu_explicit);
 #endif
 	gtk_check_button_set_active(checkHideOnLaunch, settings->hideOnLaunch);
+	gtk_check_button_set_active(checkUseLocalLib, settings->useLocalLib);
 
 	microlauncher_set_callbacks(callbacks);
 	g_signal_connect(window, "close-request", G_CALLBACK(close_request), NULL);
