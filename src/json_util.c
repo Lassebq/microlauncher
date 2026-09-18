@@ -6,28 +6,48 @@
 #include <string.h>
 #include <util/util.h>
 
+json_object *json_get_object_by_path_mutable(json_object *obj, char *key) {
+	char *dotchr = strchr(key, '.');
+	char *keym;
+	json_object *child;
+	if(dotchr) {
+		keym = dotchr + 1;
+		*dotchr = '\0';
+		child = json_object_object_get(obj, key);
+		if(json_object_is_type(child, json_type_object)) {
+			return json_get_object_by_path_mutable(child, keym);
+		}
+	}
+	return json_object_object_get(obj, key);
+}
+
+json_object *json_get_object_by_path(json_object *obj, const char *key) {
+	char *keym = g_strdup(key);
+	return json_get_object_by_path_mutable(obj, keym);
+}
+
 int32_t json_get_int(json_object *obj, const char *key) {
-	json_object *val = json_object_object_get(obj, key);
+	json_object *val = json_get_object_by_path(obj, key);
 	return (json_object_is_type(val, json_type_int)) ? json_object_get_int(val) : 0;
 }
 
 int64_t json_get_int64(json_object *obj, const char *key) {
-	json_object *val = json_object_object_get(obj, key);
+	json_object *val = json_get_object_by_path(obj, key);
 	return (json_object_is_type(val, json_type_int)) ? json_object_get_int64(val) : 0;
 }
 
 const char *json_get_string(json_object *obj, const char *key) {
-	json_object *val = json_object_object_get(obj, key);
+	json_object *val = json_get_object_by_path(obj, key);
 	return (json_object_is_type(val, json_type_string)) ? json_object_get_string(val) : NULL;
 }
 
 bool json_get_bool_fallback(json_object *obj, const char *key, bool fallback) {
-	json_object *val = json_object_object_get(obj, key);
+	json_object *val = json_get_object_by_path(obj, key);
 	return (json_object_is_type(val, json_type_boolean)) ? json_object_get_boolean(val) : fallback;
 }
 
 bool json_get_bool(json_object *obj, const char *key) {
-	json_object *val = json_object_object_get(obj, key);
+	json_object *val = json_get_object_by_path(obj, key);
 	return (json_object_is_type(val, json_type_boolean)) ? json_object_get_boolean(val) : false;
 }
 
@@ -35,7 +55,7 @@ void json_set_string(json_object *obj, const char *key, const char *value) {
 	if(!value) {
 		return;
 	}
-	json_object *val = json_object_object_get(obj, key);
+	json_object *val = json_get_object_by_path(obj, key);
 	if(!json_object_is_type(val, json_type_string)) {
 		val = json_object_new_string(value);
 		json_object_object_add(obj, key, val);
@@ -46,7 +66,7 @@ void json_set_string(json_object *obj, const char *key, const char *value) {
 }
 
 void json_set_int(json_object *obj, const char *key, int value) {
-	json_object *val = json_object_object_get(obj, key);
+	json_object *val = json_get_object_by_path(obj, key);
 	if(!json_object_is_type(val, json_type_int)) {
 		val = json_object_new_int(value);
 		json_object_object_add(obj, key, val);
@@ -57,7 +77,7 @@ void json_set_int(json_object *obj, const char *key, int value) {
 }
 
 void json_set_bool(json_object *obj, const char *key, bool value) {
-	json_object *val = json_object_object_get(obj, key);
+	json_object *val = json_get_object_by_path(obj, key);
 	if(!json_object_is_type(val, json_type_boolean)) {
 		val = json_object_new_boolean(value);
 		json_object_object_add(obj, key, val);

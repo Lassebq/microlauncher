@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+json_object *json_get_object_by_path(json_object *obj, const char *key);
+
 int32_t json_get_int(json_object *obj, const char *key);
 
 int64_t json_get_int64(json_object *obj, const char *key);

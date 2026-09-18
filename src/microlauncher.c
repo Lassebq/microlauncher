@@ -51,6 +51,7 @@ const char *JVM_LOCATIONS[] = {"C:/Program Files/Java/*/bin/java.exe", NULL};
 const char *JVM_LOCATIONS[] = {
 	"/usr/local/lib/jvm/*/bin/java",
 	"/usr/lib/jvm/*/bin/java",
+	"~/.minecraft/runtime/*/bin/java",
 	NULL};
 #elif defined(__APPLE__)
 const char *JVM_LOCATIONS[] = {"/Library/Java/JavaVirtualMachines/*/Contents/Home/bin/java", NULL};
@@ -496,17 +497,15 @@ bool microlauncher_fetch_library(json_object *libObj, const char *libraries_path
 		url = url2;
 	}
 
-	if(!settings.useLocalLib || access(realpath, R_OK) != 0) {
-		if(!microlauncher_fetch_artifact(
-			   url,
-			   realpath,
-			   NULL,
-			   json_get_string(artifact, "sha1"),
-			   json_get_int64(artifact, "size"),
-			   total_size, download_size)) {
-			snprintf(failedUrl, PATH_MAX, "%s", url);
-			return false;
-		}
+	if(!microlauncher_fetch_artifact(
+		   url,
+		   realpath,
+		   NULL,
+		   json_get_string(artifact, "sha1"),
+		   json_get_int64(artifact, "size"),
+		   total_size, download_size)) {
+		snprintf(failedUrl, PATH_MAX, "%s", url);
+		return false;
 	}
 
 	if(!natives) {
@@ -543,8 +542,7 @@ bool microlauncher_fetch_library(json_object *libObj, const char *libraries_path
 				return false;
 			}
 
-			obj = json_object_object_get(libObj, "extract");
-			obj = json_object_object_get(obj, "exclude");
+			obj = json_object_object_get(libObj, "extract.exclude");
 			if(json_object_is_type(obj, json_type_array)) {
 				size_t n = json_object_array_length(obj);
 				const char *exclusions[n + 1];
@@ -623,12 +621,9 @@ json_object *inherit_json(const char *versions_path, const char *id, bool allowU
 			json_object_object_del(thisObj, "arguments");
 		}
 		// Remember the original id of client download to avoid downloading duplicate in inherited JSONs
-		member = json_object_object_get(obj, "downloads");
-		if(member) {
-			member = json_object_object_get(member, "client");
-			if(member && json_get_string(member, "id") != NULL) {
-				json_set_string(member, "id", json_get_string(obj, "id"));
-			}
+		member = json_get_object_by_path(member, "downloads.client");
+		if(json_get_string(member, "id") != NULL) {
+			json_set_string(member, "id", json_get_string(obj, "id"));
 		}
 		merge_json_object(obj, thisObj, true, false);
 
@@ -711,7 +706,7 @@ static bool check_rules(json_object *rules, GSList *featuresList) {
 }
 
 json_object *microlauncher_fetch_version(const char *versionId, const char *versions_path, const char *libraries_path, const char *natives_path, const char *assets_dir, GCancellable *cancellable, char *failedUrl, bool allowUpdate) {
-	json_object *json, *libraries, *downloads, *artifact, *client, *iter, *assets_json, *obj, *natives;
+	json_object *json, *iter, *libraries, *assets_json, *obj, *natives;
 	char path[PATH_MAX];
 	char url[PATH_MAX];
 	snprintf(path, PATH_MAX, "%s/%s/%s.json", versions_path, versionId, versionId);
@@ -722,11 +717,9 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 	enum Platform plat = platform_get();
 	const char *str = json_get_string(json, "id");
 	libraries = json_object_object_get(json, "libraries");
-	downloads = json_object_object_get(json, "downloads");
-	client = json_object_object_get(downloads, "client");
 	snprintf(path, PATH_MAX, "%s/%s/%s.jar", versions_path, str, str);
 	// Count total size
-	long total_size = json_get_int64(client, "size");
+	long total_size = json_get_int64(json, "downloads.client.size");
 	long current_size = 0;
 	if(json_object_is_type(libraries, json_type_array)) {
 		size_t length = json_object_array_length(libraries);
@@ -736,11 +729,7 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 			if(!check_rules(json_object_object_get(iter, "rules"), NULL)) {
 				continue;
 			}
-			downloads = json_object_object_get(iter, "downloads");
-			artifact = json_object_object_get(downloads, "artifact");
-			if(artifact) {
-				total_size += json_get_int64(artifact, "size");
-			}
+			total_size += json_get_int64(iter, "downloads.artifact.size");
 
 			const char *classifier;
 			natives = json_object_object_get(iter, "natives");
@@ -753,30 +742,29 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 				}
 				classifier = json_get_string(natives, key);
 				if(classifier) {
-					obj = json_object_object_get(downloads, "classifiers");
+					obj = json_get_object_by_path(iter, "downloads.classifiers");
 					obj = json_object_object_get(obj, classifier);
-					if(obj) {
-						total_size += json_get_int64(obj, "size");
-					}
+					total_size += json_get_int64(obj, "size");
 				}
 			}
 		}
 	}
 	// Perform download
 	run_callback(stage_update, "Downloading libraries");
-	const char *clientJarId = json_get_string(client, "id");
+	obj = json_get_object_by_path(json, "downloads.client");
+	const char *clientJarId = json_get_string(obj, "id");
 	if(!clientJarId) {
 		clientJarId = str;
 	}
 	snprintf(path, PATH_MAX, "%s/%s/%s.jar", versions_path, clientJarId, clientJarId);
 
-	str = json_get_string(client, "url");
+	str = json_get_string(obj, "url");
 	if(!microlauncher_fetch_artifact(
 		   str,
 		   path,
 		   NULL,
-		   json_get_string(client, "sha1"),
-		   json_get_int64(client, "size"),
+		   json_get_string(obj, "sha1"),
+		   json_get_int64(obj, "size"),
 		   total_size, &current_size)) {
 		snprintf(failedUrl, PATH_MAX, "%s", str);
 		goto cancel;
@@ -805,7 +793,13 @@ json_object *microlauncher_fetch_version(const char *versionId, const char *vers
 	snprintf(path, PATH_MAX, "%s/indexes/%s.json", assets_dir, json_get_string(obj, "id"));
 	total_size = json_get_int64(obj, "totalSize") + json_get_int64(obj, "size"); // assets.json + all assets size
 	current_size = 0;
-	microlauncher_fetch_artifact(json_get_string(obj, "url"), path, NULL, json_get_string(obj, "sha1"), json_get_int64(obj, "size"), total_size, &current_size);
+	microlauncher_fetch_artifact(
+		json_get_string(obj, "url"),
+		path,
+		NULL,
+		json_get_string(obj, "sha1"),
+		json_get_int64(obj, "size"),
+		total_size, &current_size);
 	assets_json = json_from_file(path);
 	obj = json_object_object_get(assets_json, "objects");
 	if(json_object_is_type(obj, json_type_object)) {
@@ -833,22 +827,16 @@ cancel:
 }
 
 char *microlauncher_get_javacp(json_object *json, const char *versions_path, const char *libraries_path) {
-	json_object *libraries, *iter, *downloads, *artifact;
+	json_object *libraries, *iter;
 	char path[PATH_MAX];
 	const char *id = json_get_string(json, "id");
 	if(!id) {
 		return NULL;
 	}
 	const char *clientJarId = id;
-	downloads = json_object_object_get(json, "downloads");
-	if(downloads) {
-		json_object *client = json_object_object_get(downloads, "client");
-		if(client) {
-			clientJarId = json_get_string(client, "id");
-			if(!clientJarId) {
-				clientJarId = id;
-			}
-		}
+	clientJarId = json_get_string(json, "downloads.client.id");
+	if(!clientJarId) {
+		clientJarId = id;
 	}
 	snprintf(path, PATH_MAX, "%s/%s/%s.jar", versions_path, clientJarId, clientJarId);
 	String str = string_new(path);
@@ -862,18 +850,12 @@ char *microlauncher_get_javacp(json_object *json, const char *versions_path, con
 			if(!check_rules(json_object_object_get(iter, "rules"), NULL)) {
 				continue;
 			}
-			downloads = json_object_object_get(iter, "downloads");
-			artifact = json_object_object_get(downloads, "artifact");
-			const char *libpath = json_get_string(artifact, "path");
+			const char *libpath = json_get_string(iter, "downloads.artifact.path");
 			const char *name = json_get_string(iter, "name");
 			if(!libpath) {
 				libpath = microlauncher_get_library_path(name, NULL, path);
 			}
-#ifdef G_OS_WIN32
-			string_append_char(&str, ';');
-#else
-			string_append_char(&str, ':');
-#endif
+			string_append_char(&str, CLASSPATH_SEPARATOR);
 			string_append(&str, libraries_path);
 			string_append_char(&str, '/');
 			string_append(&str, libpath);
@@ -888,18 +870,25 @@ struct Settings *microlauncher_get_settings(void) {
 
 static void load_default_runtimes(void) {
 	char path[PATH_MAX];
+	char *dirpath;
 	const char *jvmPath;
 	const char **jvmDir = JVM_LOCATIONS;
+	const char *home_dir = g_get_home_dir();
 	char *dir;
 	const char *suffix;
 	gsize len;
 	for(; *jvmDir; jvmDir++) {
-		suffix = strchr(*jvmDir, '*');
+		if(g_str_has_prefix(*jvmDir, "~")) {
+			dirpath = g_build_filename(home_dir, *jvmDir + 1, NULL);
+		} else {
+			dirpath = g_strdup(*jvmDir);
+		}
+		suffix = strchr(dirpath, '*');
 		if(!suffix) {
 			continue;
 		}
-		len = suffix - (*jvmDir);
-		dir = g_strndup(*jvmDir, len);
+		len = suffix - (dirpath);
+		dir = g_strndup(dirpath, len);
 		dir[len - 1] = '\0';
 		suffix++;
 		GDir *gdir = g_dir_open(dir, 0, NULL);
@@ -933,6 +922,7 @@ static void load_default_runtimes(void) {
 			}
 			free(full_path);
 		}
+		free(dirpath);
 	}
 }
 
@@ -1315,6 +1305,7 @@ bool microlauncher_launch_instance(const MicrolauncherInstance *instance, Microl
 	}
 	argv[c++] = malloc_strs[m++] = g_strdup_printf("XCURSOR_SIZE=%d", xcursize);
 	if(settings.gpu_id) {
+		// FIXME: this won't work with Nvidia drivers
 		argv[c++] = malloc_strs[m++] = g_strdup_printf(settings.gpu_explicit ? "DRI_PRIME=%s!" : "DRI_PRIME=%s", settings.gpu_id);
 	}
 	if(settings.use_zink) {

@@ -1,4 +1,5 @@
 #include "gdk-pixbuf/gdk-pixbuf.h"
+#include "json_tokener.h"
 #include "microlauncher_java_runtime.h"
 #include <ctype.h>
 #include <curl/curl.h>
@@ -19,7 +20,9 @@
 #include <util/json_util.h>
 #include <util/util.h>
 #include <util/xdgutil.h>
+#ifdef HAS_WEBKIT
 #include <webkit/webkit.h>
+#endif
 #ifdef G_OS_WIN32
 #include <shlobj.h>
 #include <windows.h>
@@ -56,7 +59,6 @@ static GtkCheckButton *checkUpdate;
 static GtkCheckButton *checkUseZink;
 static GtkCheckButton *checkExplicitGpu;
 static GtkCheckButton *checkHideOnLaunch;
-static GtkCheckButton *checkUseLocalLib;
 static GtkEntry *widthEntry;
 static GtkEntry *heightEntry;
 static GtkRevealer *revealer;
@@ -151,10 +153,10 @@ static void setup_column_cb(GtkSignalListItemFactory *factory, GObject *listitem
 	gtk_list_item_set_child(GTK_LIST_ITEM(listitem), label);
 }
 
-static void bind_column_cb(GtkSignalListItemFactory *factory, GtkListItem *listitem, void *userdata) {
+static void bind_column_cb(GtkSignalListItemFactory *factory, GtkListItem *listitem, gchar *property) {
 	GtkWidget *label = gtk_list_item_get_child(listitem);
 	VersionItem *item = gtk_list_item_get_item(GTK_LIST_ITEM(listitem));
-	g_object_bind_property(item, userdata, label, "label", G_BINDING_SYNC_CREATE);
+	g_object_bind_property(item, property, label, "label", G_BINDING_SYNC_CREATE);
 }
 
 struct UserDialog {
@@ -527,6 +529,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	GtkWidget *widget;
 	GtkScrolledWindow *scrolledWindow;
 	GtkBox *box;
+	GtkBox *container;
 	GtkGrid *grid;
 	GtkEntry *entry;
 	int row = 0;
@@ -593,7 +596,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	}
 	createInstance->instanceDir = entry;
 	gtk_widget_set_hexpand(widget, true);
-	GtkBox *container = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10));
+	container = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10));
 	gtk_box_append(container, widget);
 	widget = gtk_button_new_with_label("Select");
 
@@ -671,13 +674,16 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 
 	GtkExpression *expr = gtk_property_expression_new(microlauncher_version_item_get_type(), NULL, "version");
 
+	container = GTK_BOX(gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10));
 	GtkStringFilter *stringFilter = gtk_string_filter_new(expr);
 	gtk_string_filter_set_ignore_case(stringFilter, true);
 	gtk_string_filter_set_match_mode(stringFilter, GTK_STRING_FILTER_MATCH_MODE_SUBSTRING);
 	widget = gtk_entry_new();
+	gtk_widget_set_hexpand(widget, true);
 	g_signal_connect(widget, "changed", G_CALLBACK(set_entry_filter), stringFilter);
 	gtk_entry_set_placeholder_text(GTK_ENTRY(widget), "Search");
-	widget = gtk_widget_with_label("Version:", widget);
+	gtk_box_append(container, widget);
+	widget = gtk_widget_with_label("Version:", GTK_WIDGET(container));
 	gtk_box_append(box, widget);
 
 	widget = gtk_scrolled_window_new();
@@ -688,6 +694,7 @@ static void microlauncher_modify_instance_window(GtkButton *button, Microlaunche
 	GListStore *store = g_list_store_new(G_TYPE_OBJECT);
 	GHashTable *manifest = microlauncher_get_manifest();
 	g_hash_table_foreach(manifest, (GHFunc)add_version, store);
+
 	widget = gtk_column_view_new(NULL);
 	GtkColumnView *columnView = GTK_COLUMN_VIEW(widget);
 	createInstance->versionView = columnView;
@@ -935,8 +942,9 @@ static void apply_settings(void) {
 #endif
 	settings->demo = gtk_check_button_get_active(checkDemo);
 	settings->hideOnLaunch = gtk_check_button_get_active(checkHideOnLaunch);
-	settings->useLocalLib = gtk_check_button_get_active(checkUseLocalLib);
 }
+
+#ifdef HAS_WEBKIT
 
 static gboolean on_decide_policy(WebKitWebView *web_view,
 								 WebKitPolicyDecision *decision,
@@ -998,6 +1006,7 @@ static void show_get_mods(GtkWindow *parent) {
 	gtk_window_set_child(window, GTK_WIDGET(box));
 	gtk_window_present(window);
 }
+#endif
 
 static void clicked_play(void) {
 	if(instancePid != 0) {
@@ -1119,11 +1128,6 @@ static GtkWidget *microlauncher_gui_page_launcher(void) {
 
 	widget = gtk_check_button_new_with_label("Hide launcher");
 	checkHideOnLaunch = GTK_CHECK_BUTTON(widget);
-	gtk_widget_set_hexpand(widget, false);
-	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
-
-	widget = gtk_check_button_new_with_label("Use local libraries (skip re-download for modified libraries)");
-	checkUseLocalLib = GTK_CHECK_BUTTON(widget);
 	gtk_widget_set_hexpand(widget, false);
 	gtk_grid_attach(grid, widget, 0, grid_row++, 2, 1);
 
@@ -2264,7 +2268,6 @@ static void activate(GtkApplication *app, gpointer user_data) {
 	gtk_check_button_set_active(checkExplicitGpu, settings->gpu_explicit);
 #endif
 	gtk_check_button_set_active(checkHideOnLaunch, settings->hideOnLaunch);
-	gtk_check_button_set_active(checkUseLocalLib, settings->useLocalLib);
 
 	microlauncher_set_callbacks(callbacks);
 	g_signal_connect(window, "close-request", G_CALLBACK(close_request), NULL);

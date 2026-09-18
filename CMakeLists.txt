@@ -25,13 +25,14 @@ endif()
 
 find_package(PkgConfig REQUIRED)
 set(DEPS
-    gtk4 webkitgtk-6.0 json-c gio-2.0 glib-2.0 gobject-2.0 libcurl libcrypto libzip
+    gtk4 json-c gio-2.0 glib-2.0 gobject-2.0 libcurl libcrypto libzip
 )
 if(UNIX AND NOT APPLE)
     list(APPEND DEPS uuid)
 endif()
 
 pkg_check_modules(PKGCONF REQUIRED ${DEPS})
+pkg_check_modules(WEBKIT webkitgtk-6.0)
 pkg_check_modules(LIBPCI libpci)
 
 set(ICON_RES 48 64 128 256 512)
@@ -161,11 +162,18 @@ if(FAST_RESOURCE_CHECK)
     target_compile_definitions(microlauncher PRIVATE FAST_RESOURCE_CHECK=1)
 endif()
 
+if(WEBKIT_FOUND)
+    target_compile_definitions(microlauncher PRIVATE HAS_WEBKIT=1)
+    target_link_directories(microlauncher PRIVATE ${WEBKIT_LIBRARY_DIRS})
+    target_link_libraries(microlauncher PRIVATE ${WEBKIT_LIBRARIES})
+    target_include_directories(microlauncher PRIVATE ${WEBKIT_INCLUDE_DIRS})
+endif()
+
 if(NOT LIBPCI_FOUND)
     target_compile_definitions(microlauncher PRIVATE DISABLE_GPU=1)
 else()
     target_link_directories(microlauncher PRIVATE ${LIBPCI_LIBRARY_DIRS})
-    target_link_libraries(microlauncher PRIVATE ${LIBPCI_LIBRARIES} m)
+    target_link_libraries(microlauncher PRIVATE ${LIBPCI_LIBRARIES})
     target_include_directories(microlauncher PRIVATE ${LIBPCI_INCLUDE_DIRS})
 endif()
 

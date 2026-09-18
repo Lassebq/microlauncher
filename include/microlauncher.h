@@ -12,6 +12,12 @@
 #include <shlobj.h>
 #endif
 
+#ifdef G_OS_WIN32
+#define CLASSPATH_SEPARATOR ';'
+#else
+#define CLASSPATH_SEPARATOR ':'
+#endif
+
 #define MOJANG_MANIFEST "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json"
 #define BETTERJSONS_MANIFEST "https://mcphackers.org/BetterJSONs/version_manifest_v2.json"
 #ifndef MANIFEST_URL
@@ -41,11 +47,11 @@ struct Settings {
 	bool allowUpdate;
 	bool use_zink;
 	bool hideOnLaunch;
-	bool useLocalLib;
 };
 
 MicrolauncherInstance *microlauncher_instance_get(GSList *list, const char *id);
 MicrolauncherAccount *microlauncher_account_get(GSList *list, const char *id);
+bool microlauncher_fetch_artifact(const char *url, const char *path, const char *label, const char *sha1, long size, long total_size, long *download_size);
 bool microlauncher_launch_instance(const MicrolauncherInstance *instance, MicrolauncherAccount *user, GCancellable *cancellable);
 void microlauncher_save_settings(void);
 void microlauncher_load_settings(void);
